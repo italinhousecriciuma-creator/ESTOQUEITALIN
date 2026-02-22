@@ -427,14 +427,21 @@ function App(){
   useEffect(()=>{
     if(!init) return;
     if(tmr.current) clearTimeout(tmr.current);
+    // Captura snapshot dos valores atuais no momento do render
+    const snap={items,emps,movs,port,cats,units};
     tmr.current=setTimeout(async()=>{
       const saves=[];
-      const chk=(key,val,rk)=>{if(JSON.stringify(val)!==JSON.stringify(ref.current[rk])){saves.push(db.save(key,val));ref.current[rk]=val;}};
-      chk(DB_KEYS.items,items,"items");chk(DB_KEYS.employees,emps,"emps");chk(DB_KEYS.movements,movs,"movs");
-      chk(DB_KEYS.portioning,port,"port");chk(DB_KEYS.categories,cats,"cats");chk(DB_KEYS.units,units,"units");
+      const chk=(key,val,rk)=>{if(JSON.stringify(val)!==JSON.stringify(ref.current[rk])){saves.push({key,val,rk});}};
+      chk(DB_KEYS.items,snap.items,"items");chk(DB_KEYS.employees,snap.emps,"emps");chk(DB_KEYS.movements,snap.movs,"movs");
+      chk(DB_KEYS.portioning,snap.port,"port");chk(DB_KEYS.categories,snap.cats,"cats");chk(DB_KEYS.units,snap.units,"units");
       if(saves.length>0){
         setDbSt("saving");
-        try{await Promise.all(saves);setDbSt("saved");setLsav(new Date().toISOString());}
+        try{
+          await Promise.all(saves.map(s=>db.save(s.key,s.val)));
+          // Só atualiza ref APÓS save completar com sucesso
+          saves.forEach(s=>{ref.current[s.rk]=s.val;});
+          setDbSt("saved");setLsav(new Date().toISOString());
+        }
         catch{setDbSt("error");}
       }
     },800);
@@ -669,7 +676,13 @@ function ItemsTab({items,setItems,categories,units,showToast}){
         {td&&<div style={{background:C.dangerLight,padding:14,borderRadius:8,border:"1px solid "+C.danger,marginBottom:20}}><div style={{fontSize:15,fontWeight:700}}>{td.name}</div><div style={{fontSize:12,color:C.textSec,marginTop:4}}>Estoque: {td.currentStock} {td.unit}</div></div>}
         <div style={{display:"flex",gap:12,justifyContent:"flex-end"}}>
           <Btn variant="ghost" onClick={()=>setDm(false)}>Cancelar</Btn>
-          <Btn variant="danger" onClick={()=>{setItems(p=>p.filter(i=>i.id!==td.id));showToast(td.name+" excluído","warning");setDm(false);}} icon={<Ic.Trash size={16}/>}>Excluir</Btn>
+          <Btn variant="danger" onClick={()=>{
+            const novos=items.filter(i=>i.id!==td.id);
+            setItems(novos);
+            db.save(DB_KEYS.items,novos);
+            showToast(td.name+" excluído","warning");
+            setDm(false);
+          }} icon={<Ic.Trash size={16}/>}>Excluir</Btn>
         </div>
       </Modal>
     </div>
