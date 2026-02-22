@@ -11,22 +11,22 @@ const DB_KEYS = {
   units: 'italin-house:units'
 };
 
-const db = {
+  const db = {
   async save(key, data) {
     try {
-      const result = await window.storage.set(key, JSON.stringify(data));
-      return result !== null;
+      localStorage.setItem(key, JSON.stringify(data));
+      return true;
     } catch (error) {
       console.error(`❌ Erro ao salvar ${key}:`, error);
       return false;
     }
   },
-  
+
   async load(key, defaultValue = null) {
     try {
-      const result = await window.storage.get(key);
-      if (result && result.value) {
-        return JSON.parse(result.value);
+      const result = localStorage.getItem(key);
+      if (result) {
+        return JSON.parse(result);
       }
       return defaultValue;
     } catch (error) {
@@ -34,20 +34,20 @@ const db = {
       return defaultValue;
     }
   },
-  
+
   async delete(key) {
     try {
-      const result = await window.storage.delete(key);
-      return result;
+      localStorage.removeItem(key);
+      return true;
     } catch (error) {
       console.error(`❌ Erro ao deletar ${key}:`, error);
       return null;
     }
   },
-  
+
   async clearAll() {
     try {
-      await Promise.all(Object.values(DB_KEYS).map(key => window.storage.delete(key)));
+      Object.values(DB_KEYS).forEach(key => localStorage.removeItem(key));
       console.log('✓ Todos os dados foram limpos');
       return true;
     } catch (error) {
