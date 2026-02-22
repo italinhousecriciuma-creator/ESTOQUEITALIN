@@ -96,9 +96,23 @@ function LineChart({data,height=240}){
 // DB
 const DB_KEYS={items:'italin:items',employees:'italin:employees',movements:'italin:movements',portioning:'italin:portioning',categories:'italin:categories',units:'italin:units'};
 const db={
-  async save(k,d){try{localStorage.setItem(k,JSON.stringify(d));return true;}catch(e){return false;}},
-  async load(k,def){try{const r=localStorage.getItem(k);return r?JSON.parse(r):(def||null);}catch(e){return def||null;}},
-  async clearAll(){Object.values(DB_KEYS).forEach(k=>localStorage.removeItem(k));}
+  async save(k,d){
+    try{
+      const r=await fetch('/api/db',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:k,value:d})});
+      return r.ok;
+    }catch(e){console.error('db.save error',e);return false;}
+  },
+  async load(k,def){
+    try{
+      const r=await fetch('/api/db?key='+encodeURIComponent(k));
+      if(!r.ok) return def||null;
+      const data=await r.json();
+      return data!==null&&data!==undefined?data:(def||null);
+    }catch(e){console.error('db.load error',e);return def||null;}
+  },
+  async clearAll(){
+    try{await fetch('/api/db',{method:'DELETE'});return true;}catch(e){return false;}
+  }
 };
 
 // Initial data
@@ -676,10 +690,10 @@ function ItemsTab({items,setItems,categories,units,showToast}){
         {td&&<div style={{background:C.dangerLight,padding:14,borderRadius:8,border:"1px solid "+C.danger,marginBottom:20}}><div style={{fontSize:15,fontWeight:700}}>{td.name}</div><div style={{fontSize:12,color:C.textSec,marginTop:4}}>Estoque: {td.currentStock} {td.unit}</div></div>}
         <div style={{display:"flex",gap:12,justifyContent:"flex-end"}}>
           <Btn variant="ghost" onClick={()=>setDm(false)}>Cancelar</Btn>
-          <Btn variant="danger" onClick={()=>{
+          <Btn variant="danger" onClick={async()=>{
             const novos=items.filter(i=>i.id!==td.id);
             setItems(novos);
-            db.save(DB_KEYS.items,novos);
+            await db.save(DB_KEYS.items,novos);
             showToast(td.name+" excluído","warning");
             setDm(false);
           }} icon={<Ic.Trash size={16}/>}>Excluir</Btn>
