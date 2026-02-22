@@ -1,15 +1,3 @@
-import { useState, useEffect, useMemo, useCallback, useRef } from "react";
-import {
-  Package, TrendingUp, TrendingDown, AlertTriangle, Search, Plus, Edit, Trash2,
-  Calendar, X, Check, FileText, Users, ArrowUpCircle, ArrowDownCircle, Home,
-  Bell, Warehouse, AlertCircle, CheckCircle, Info, RefreshCw, Menu, Download,
-  Upload, Settings, Scissors, BarChart3, Database, Cloud, CloudOff, HardDrive,
-  ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ArrowUpDown, ArrowUp, ArrowDown
-} from "lucide-react";
-import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  PieChart as RePieChart, Pie, Cell, Legend, Area, AreaChart, LineChart, Line
-} from "recharts";
 
 /* ═══════════════════════════════════════════
    SISTEMA DE BANCO DE DADOS (PERSISTÊNCIA)
