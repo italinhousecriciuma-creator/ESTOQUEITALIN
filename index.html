@@ -4,17 +4,27 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
     <title>Estoque Italin</title>
-    <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
-    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
-    <script>window.React = React;</script>
-    <script src="https://unpkg.com/recharts/umd/Recharts.js"></script>
-    <script src="https://unpkg.com/lucide-react/dist/umd/lucide-react.js"></script>
+
+    <!-- 1. React PRIMEIRO -->
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+
+    <!-- 2. Expõe React globalmente para o Recharts encontrar -->
+    <script>window.React = React; window.ReactDOM = ReactDOM;</script>
+
+    <!-- 3. Dependências que precisam do React -->
+    <script src="https://unpkg.com/recharts@2.8.0/umd/Recharts.js"></script>
+    <script src="https://unpkg.com/lucide-react@0.263.1/dist/umd/lucide-react.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+
+    <!-- 4. Babel por último -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   </head>
   <body>
     <div id="root"></div>
-    <script type="text/babel" src="./ESTOQUEITALIN.jsx" data-type="module"></script>
+
+    <script type="text/babel" src="./ESTOQUEITALIN.jsx"></script>
+
     <script type="text/babel">
       ReactDOM.createRoot(document.getElementById('root')).render(<App />);
     </script>
