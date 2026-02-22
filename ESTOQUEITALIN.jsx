@@ -10,6 +10,9 @@ const DB_KEYS = {
   categories: 'italin-house:categories',
   units: 'italin-house:units'
 };
+const { useState, useEffect, useMemo, useCallback, useRef } = React;
+const { AreaChart, BarChart, LineChart, PieChart, Area, Bar, Line, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } = Recharts;
+const { Home, Package, ArrowUpCircle, ArrowDownCircle, AlertTriangle, Scissors, Users, FileText, Settings, Plus, Edit, Trash2, Check, X, Search, Download, RefreshCw, Bell, Menu, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ArrowUp, ArrowDown, ArrowUpDown, Info, CheckCircle, AlertCircle, Cloud, CloudOff, HardDrive, Database, Warehouse } = lucideReact;
 
   const db = {
   async save(key, data) {
@@ -517,7 +520,7 @@ const nextId = arr => (arr.length > 0 ? Math.max(...arr.map(x => x.id)) + 1 : 1)
 /* ═══════════════════════════════════════════
    APP PRINCIPAL
    ═══════════════════════════════════════════ */
-export default function InventoryApp() {
+function App() {
   const [activeTab, setActiveTab] = useState("dashboard");
   const [items, setItems] = useState([]);
   const [employees, setEmployees] = useState([]);
