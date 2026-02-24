@@ -16,7 +16,11 @@ async function boot(){
   window.React=React; window.ReactDOM=ReactDOM;
   await loadScript('https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js');
   const src=document.getElementById('app').textContent;
-  const cacheKey='italin_babel_v2';
+  // Hash simples do código para invalidar cache em novos deploys
+  const srcHash=src.length+'-'+src.slice(0,64).replace(/\s/g,'').slice(0,20);
+  const cacheKey='italin_babel_'+srcHash;
+  // Limpa caches de versões antigas
+  Object.keys(sessionStorage).filter(k=>k.startsWith('italin_babel_')&&k!==cacheKey).forEach(k=>sessionStorage.removeItem(k));
   let out=sessionStorage.getItem(cacheKey);
   if(!out){
     await loadScript('https://unpkg.com/@babel/standalone/babel.min.js');
@@ -234,7 +238,7 @@ function Toast({message,type,onClose}){
     <div style={{position:"fixed",top:24,right:24,zIndex:9999,background:cfg.bg,borderLeft:"4px solid "+cfg.bd,borderRadius:10,padding:"14px 20px",display:"flex",alignItems:"center",gap:10,boxShadow:"0 8px 32px rgba(0,0,0,.12)",minWidth:300,maxWidth:440}}>
       <cfg.IC size={18} color={cfg.bd}/>
       <span style={{color:C.text,fontSize:14,fontWeight:500,flex:1,fontFamily:font}}>{message}</span>
-      <Ic.Close size={16} color={C.textMuted} style={{cursor:"pointer"}} onClick={onClose}/>
+      <div onClick={onClose} style={{cursor:"pointer",display:"flex",alignItems:"center",flexShrink:0}}><Ic.Close size={16} color={C.textMuted}/></div>
     </div>
   );
 }
@@ -791,6 +795,8 @@ function ItemsTab({items,setItems,categories,units,showToast}){
     if(!f.name||!f.unit||!f.category||!f.minStock||!f.cost){showToast("Preencha todos os campos","error");return;}
     const ms=Number(f.minStock),c=Number(f.cost);
     if(isNaN(ms)||isNaN(c)){showToast("Valores inválidos","error");return;}
+    if(ms<0){showToast("Estoque mínimo não pode ser negativo","error");return;}
+    if(c<0){showToast("Custo não pode ser negativo","error");return;}
     setSav(true);await new Promise(r=>setTimeout(r,300));
     if(ed){setItems(p=>p.map(i=>i.id===ed.id?{...i,...f,minStock:ms,cost:c}:i));showToast("Atualizado!");}
     else{setItems(p=>[...p,{id:nid(items),...f,minStock:ms,cost:c,currentStock:0}]);showToast("Cadastrado!");}
@@ -899,7 +905,7 @@ function InTab({items,setItems,employees,movements,setMovements,showToast}){
       }
       showToast("Entrada atualizada!");
     } else {
-      setMovements(prev=>[...prev,{id:nid(movements),type:"in",itemId:Number(f.itemId),itemName:sel.name,quantity:qty,date:f.date,time:f.time,employee:f.employee,supplier:f.supplier||sel.supplier,price:pr,batch:f.batch,expiry:f.expiry||null,notes:"",invoice:null,reason:null,wasteReason:null}]);
+      setMovements(prev=>[...prev,{id:nid(prev),type:"in",itemId:Number(f.itemId),itemName:sel.name,quantity:qty,date:f.date,time:f.time,employee:f.employee,supplier:f.supplier||sel.supplier,price:pr,batch:f.batch,expiry:f.expiry||null,notes:"",invoice:null,reason:null,wasteReason:null}]);
       setItems(prev=>prev.map(i=>i.id===Number(f.itemId)?{...i,currentStock:i.currentStock+qty}:i));
       showToast("Entrada de "+qty+" "+sel.unit+" registrada!");
     }
@@ -1042,12 +1048,12 @@ function OutTab({items,setItems,employees,movements,setMovements,showToast}){
         }));
       } else {
         const diff=ed.quantity-qty;
-        setItems(prev=>prev.map(i=>i.id===Number(f.itemId)?{...i,currentStock:i.currentStock+diff}:i));
+        setItems(prev=>prev.map(i=>i.id===Number(f.itemId)?{...i,currentStock:Math.max(0,i.currentStock+diff)}:i));
       }
       showToast("Saída atualizada!");
     } else {
       if(qty>sel.currentStock){showToast("Insuficiente! Disponível: "+sel.currentStock,"error");setSav(false);return;}
-      setMovements(prev=>[...prev,{id:nid(movements),type:"out",itemId:Number(f.itemId),itemName:sel.name,quantity:qty,date:f.date,time:f.time,employee:f.employee,reason:f.reason,wasteReason:f.wasteReason||null,notes:"",supplier:null,price:null,batch:null,expiry:null,invoice:null}]);
+      setMovements(prev=>[...prev,{id:nid(prev),type:"out",itemId:Number(f.itemId),itemName:sel.name,quantity:qty,date:f.date,time:f.time,employee:f.employee,reason:f.reason,wasteReason:f.wasteReason||null,notes:"",supplier:null,price:null,batch:null,expiry:null,invoice:null}]);
       setItems(prev=>prev.map(i=>i.id===Number(f.itemId)?{...i,currentStock:i.currentStock-qty}:i));
       showToast("Saída de "+qty+" "+sel.unit+" registrada!");
     }
@@ -1217,13 +1223,24 @@ function PortTab({items,setItems,employees,portioning,setPortioning,showToast}){
     if(f.date>today()){showToast("Data não pode ser futura","error");return;}
     setSav(true);await new Promise(r=>setTimeout(r,300));
     if(ed){
-      const diff=ed.quantity-qty; // positivo = devolve estoque, negativo = consome mais
+      const itemMudou=ed.itemId!==Number(f.itemId);
       setPortioning(prev=>prev.map(p=>p.id===ed.id?{...p,itemId:Number(f.itemId),itemName:sel.name,quantity:qty,date:f.date,time:f.time,employee:f.employee}:p));
-      setItems(prev=>prev.map(i=>i.id===Number(f.itemId)?{...i,currentStock:Math.max(0,i.currentStock+diff)}:i));
+      if(itemMudou){
+        // Devolve estoque ao item antigo e consome do novo
+        setItems(prev=>prev.map(i=>{
+          if(i.id===ed.itemId) return {...i,currentStock:i.currentStock+ed.quantity};
+          if(i.id===Number(f.itemId)) return {...i,currentStock:Math.max(0,i.currentStock-qty)};
+          return i;
+        }));
+      } else {
+        const diff=ed.quantity-qty; // positivo = devolve estoque, negativo = consome mais
+        setItems(prev=>prev.map(i=>i.id===Number(f.itemId)?{...i,currentStock:Math.max(0,i.currentStock+diff)}:i));
+      }
       showToast("Porcionamento atualizado!");
     } else {
+      if(qty>sel.currentStock){showToast("Estoque insuficiente! Disponível: "+sel.currentStock+" "+sel.unit,"error");setSav(false);return;}
       setPortioning(prev=>[...prev,{id:nid(portioning),itemId:Number(f.itemId),itemName:sel.name,quantity:qty,date:f.date,time:f.time,employee:f.employee}]);
-      setItems(prev=>prev.map(i=>i.id===Number(f.itemId)?{...i,currentStock:Math.max(0,i.currentStock-qty)}:i));
+      setItems(prev=>prev.map(i=>i.id===Number(f.itemId)?{...i,currentStock:i.currentStock-qty}:i));
       showToast("Porcionamento registrado!");
     }
     setSav(false);setMod(false);setEd(null);setF({...ef,date:today(),time:nowT()});
@@ -1304,9 +1321,11 @@ function EmpTab({employees,setEmployees,showToast}){
 
   async function save(){
     if(!f.name||!f.role||!f.username){showToast("Preencha todos os campos","error");return;}
+    const usnTaken=employees.some(e=>e.username===f.username.trim()&&(!ed||e.id!==ed.id));
+    if(usnTaken){showToast("Nome de usuário já existe!","error");return;}
     setSav(true);await new Promise(r=>setTimeout(r,300));
-    if(ed){setEmployees(prev=>prev.map(e=>e.id===ed.id?{...e,...f}:e));showToast("Atualizado!");}
-    else{setEmployees(prev=>[...prev,{id:nid(prev),...f,status:"Ativo"}]);showToast("Cadastrado!");}
+    if(ed){setEmployees(prev=>prev.map(e=>e.id===ed.id?{...e,...f,username:f.username.trim()}:e));showToast("Atualizado!");}
+    else{setEmployees(prev=>[...prev,{id:nid(prev),...f,username:f.username.trim(),status:"Ativo"}]);showToast("Cadastrado!");}
     setSav(false);setMod(false);
   }
 
