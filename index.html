@@ -11,13 +11,18 @@
 <script>
 function loadScript(src){return new Promise((res,rej)=>{const s=document.createElement('script');s.src=src;s.onload=res;s.onerror=rej;document.head.appendChild(s);});}
 async function boot(){
-  await loadScript('https://unpkg.com/react@18/umd/react.development.js');
-  await loadScript('https://unpkg.com/react-dom@18/umd/react-dom.development.js');
+  await loadScript('https://unpkg.com/react@18/umd/react.production.min.js');
+  await loadScript('https://unpkg.com/react-dom@18/umd/react-dom.production.min.js');
   window.React=React; window.ReactDOM=ReactDOM;
   await loadScript('https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js');
-  await loadScript('https://unpkg.com/@babel/standalone/babel.min.js');
-  const code=document.getElementById('app').textContent;
-  const out=Babel.transform(code,{presets:['react']}).code;
+  const src=document.getElementById('app').textContent;
+  const cacheKey='italin_babel_v2';
+  let out=sessionStorage.getItem(cacheKey);
+  if(!out){
+    await loadScript('https://unpkg.com/@babel/standalone/babel.min.js');
+    out=Babel.transform(src,{presets:['react']}).code;
+    try{sessionStorage.setItem(cacheKey,out);}catch(e){}
+  }
   eval(out);
 }
 boot().catch(e=>{document.getElementById('root').innerHTML='<div style="padding:40px;color:red"><h2>Erro:</h2><pre>'+e+'</pre></div>';});
@@ -65,6 +70,7 @@ const Ic={
 // Pure SVG chart
 function LineChart({data,height=240}){
   if(!data||data.length<2) return null;
+  const [tip,setTip]=useState(null);
   const W=800,H=height,PL=50,PR=20,PT=20,PB=40;
   const cW=W-PL-PR, cH=H-PT-PB;
   const maxV=Math.max(...data.flatMap(d=>[d.entradas,d.saidas]),1);
@@ -73,23 +79,40 @@ function LineChart({data,height=240}){
   const pts=k=>data.map((d,i)=>x(i)+","+y(d[k]||0)).join(" ");
   const area=k=>{const p=data.map((d,i)=>x(i)+","+y(d[k]||0)).join(" L");return "M"+x(0)+","+y(0)+" L"+p+" L"+x(data.length-1)+","+(PT+cH)+" L"+x(0)+","+(PT+cH)+" Z";};
   return(
-    <svg viewBox={"0 0 "+W+" "+H} style={{width:"100%",height:height,display:"block"}}>
-      <defs>
-        <linearGradient id="gi" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#2D5A27" stopOpacity="0.25"/><stop offset="95%" stopColor="#2D5A27" stopOpacity="0"/></linearGradient>
-        <linearGradient id="go" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#C2452D" stopOpacity="0.25"/><stop offset="95%" stopColor="#C2452D" stopOpacity="0"/></linearGradient>
-      </defs>
-      {[0,1,2,3,4].map(i=>{const yy=PT+i*(cH/4);return <line key={i} x1={PL} y1={yy} x2={PL+cW} y2={yy} stroke="#E8DDD4" strokeDasharray="4 2"/>;}).map(e=>e)}
-      {[0,1,2,3,4].map(i=>{const v=Math.round(maxV*(1-i/4));const yy=PT+i*(cH/4);return <text key={i} x={PL-6} y={yy+4} textAnchor="end" fontSize="11" fill="#9A8A7E">{v}</text>;}).map(e=>e)}
-      {data.filter((_,i)=>i%Math.ceil(data.length/7)===0||i===data.length-1).map(d=>{const i=data.indexOf(d);return <text key={i} x={x(i)} y={H-8} textAnchor="middle" fontSize="11" fill="#9A8A7E">{d.date}</text>;})}
-      <path d={area("entradas")} fill="url(#gi)"/>
-      <path d={area("saidas")} fill="url(#go)"/>
-      <polyline points={pts("entradas")} fill="none" stroke="#2D5A27" strokeWidth="2.5" strokeLinejoin="round"/>
-      <polyline points={pts("saidas")} fill="none" stroke="#C2452D" strokeWidth="2.5" strokeLinejoin="round"/>
-      <rect x={PL} y={H-12} width="12" height="3" fill="#2D5A27" rx="1.5"/>
-      <text x={PL+16} y={H-6} fontSize="11" fill="#6B5B4F">Entradas</text>
-      <rect x={PL+100} y={H-12} width="12" height="3" fill="#C2452D" rx="1.5"/>
-      <text x={PL+116} y={H-6} fontSize="11" fill="#6B5B4F">Saidas</text>
-    </svg>
+    <div style={{position:"relative"}}>
+      {tip&&(
+        <div style={{position:"absolute",left:tip.x+"%",top:0,transform:"translateX(-50%)",background:C.text,color:"#fff",borderRadius:8,padding:"8px 12px",fontSize:12,pointerEvents:"none",zIndex:10,whiteSpace:"nowrap",boxShadow:"0 4px 16px rgba(0,0,0,.2)"}}>
+          <div style={{fontWeight:700,marginBottom:4}}>{tip.date}</div>
+          <div style={{color:"#A8D5A2"}}>↑ Entradas: <strong>{tip.entradas}</strong></div>
+          <div style={{color:"#F4A99A"}}>↓ Saídas: <strong>{tip.saidas}</strong></div>
+        </div>
+      )}
+      <svg viewBox={"0 0 "+W+" "+H} style={{width:"100%",height:height,display:"block"}}
+        onMouseLeave={()=>setTip(null)}>
+        <defs>
+          <linearGradient id="gi" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#2D5A27" stopOpacity="0.25"/><stop offset="95%" stopColor="#2D5A27" stopOpacity="0"/></linearGradient>
+          <linearGradient id="go" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#C2452D" stopOpacity="0.25"/><stop offset="95%" stopColor="#C2452D" stopOpacity="0"/></linearGradient>
+        </defs>
+        {[0,1,2,3,4].map(i=>{const yy=PT+i*(cH/4);return <line key={i} x1={PL} y1={yy} x2={PL+cW} y2={yy} stroke="#E8DDD4" strokeDasharray="4 2"/>;}).map(e=>e)}
+        {[0,1,2,3,4].map(i=>{const v=Math.round(maxV*(1-i/4));const yy=PT+i*(cH/4);return <text key={i} x={PL-6} y={yy+4} textAnchor="end" fontSize="11" fill="#9A8A7E">{v}</text>;}).map(e=>e)}
+        {data.filter((_,i)=>i%Math.ceil(data.length/7)===0||i===data.length-1).map(d=>{const i=data.indexOf(d);return <text key={i} x={x(i)} y={H-8} textAnchor="middle" fontSize="11" fill="#9A8A7E">{d.date}</text>;})}
+        <path d={area("entradas")} fill="url(#gi)"/>
+        <path d={area("saidas")} fill="url(#go)"/>
+        <polyline points={pts("entradas")} fill="none" stroke="#2D5A27" strokeWidth="2.5" strokeLinejoin="round"/>
+        <polyline points={pts("saidas")} fill="none" stroke="#C2452D" strokeWidth="2.5" strokeLinejoin="round"/>
+        {data.map((d,i)=>(
+          <g key={i} onMouseEnter={()=>setTip({...d,x:(x(i)-PL)/cW*100})}>
+            <line x1={x(i)} y1={PT} x2={x(i)} y2={PT+cH} stroke="transparent" strokeWidth="24"/>
+            <circle cx={x(i)} cy={y(d.entradas||0)} r={tip&&tip.date===d.date?5:3} fill="#2D5A27" opacity={tip&&tip.date===d.date?1:0.5}/>
+            <circle cx={x(i)} cy={y(d.saidas||0)} r={tip&&tip.date===d.date?5:3} fill="#C2452D" opacity={tip&&tip.date===d.date?1:0.5}/>
+          </g>
+        ))}
+        <rect x={PL} y={H-12} width="12" height="3" fill="#2D5A27" rx="1.5"/>
+        <text x={PL+16} y={H-6} fontSize="11" fill="#6B5B4F">Entradas</text>
+        <rect x={PL+100} y={H-12} width="12" height="3" fill="#C2452D" rx="1.5"/>
+        <text x={PL+116} y={H-6} fontSize="11" fill="#6B5B4F">Saídas</text>
+      </svg>
+    </div>
   );
 }
 
@@ -98,20 +121,35 @@ const DB_KEYS={items:'italin:items',employees:'italin:employees',movements:'ital
 const db={
   async save(k,d){
     try{
+      // Atualiza cache local imediatamente
+      try{sessionStorage.setItem('cache:'+k, JSON.stringify(d));}catch(e){}
       const r=await fetch('/api/db',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:k,value:d})});
       return r.ok;
     }catch(e){console.error('db.save error',e);return false;}
   },
   async load(k,def){
     try{
+      // Tenta cache local primeiro para resposta instantânea
+      const cached=sessionStorage.getItem('cache:'+k);
+      if(cached){
+        // Atualiza em background sem bloquear
+        fetch('/api/db?key='+encodeURIComponent(k)).then(async r=>{
+          if(r.ok){const fresh=await r.json();if(fresh!==null)try{sessionStorage.setItem('cache:'+k,JSON.stringify(fresh));}catch(e){}}
+        }).catch(()=>{});
+        return JSON.parse(cached);
+      }
       const r=await fetch('/api/db?key='+encodeURIComponent(k));
       if(!r.ok) return def||null;
       const data=await r.json();
+      if(data!==null&&data!==undefined)try{sessionStorage.setItem('cache:'+k,JSON.stringify(data));}catch(e){}
       return data!==null&&data!==undefined?data:(def||null);
     }catch(e){console.error('db.load error',e);return def||null;}
   },
   async clearAll(){
-    try{await fetch('/api/db',{method:'DELETE'});return true;}catch(e){return false;}
+    try{
+      Object.values(DB_KEYS).forEach(k=>sessionStorage.removeItem('cache:'+k));
+      await fetch('/api/db',{method:'DELETE'});return true;
+    }catch(e){return false;}
   }
 };
 
@@ -297,9 +335,14 @@ function SBar({value,onChange,placeholder}){
         <Ic.Search size={16} color={C.textMuted}/>
       </div>
       <input value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder||"Buscar..."}
-        style={{width:"100%",padding:"10px 14px 10px 40px",border:"1.5px solid "+C.border,borderRadius:10,fontSize:14,color:C.text,background:C.card,outline:"none",fontFamily:font,boxSizing:"border-box"}}
+        style={{width:"100%",padding:"10px 36px 10px 40px",border:"1.5px solid "+C.border,borderRadius:10,fontSize:14,color:C.text,background:C.card,outline:"none",fontFamily:font,boxSizing:"border-box"}}
         onFocus={e=>{e.target.style.borderColor=C.primary;e.target.style.boxShadow="0 0 0 3px "+C.primaryLight;}}
         onBlur={e=>{e.target.style.borderColor=C.border;e.target.style.boxShadow="none";}}/>
+      {value&&(
+        <div onClick={()=>onChange("")} style={{position:"absolute",right:12,top:"50%",transform:"translateY(-50%)",cursor:"pointer",padding:2,borderRadius:4,background:C.border,display:"flex",alignItems:"center",justifyContent:"center"}}>
+          <Ic.Close size={12} color={C.textMuted}/>
+        </div>
+      )}
     </div>
   );
 }
@@ -503,6 +546,7 @@ function App(){
   const [init,setInit]=useState(false);
   const [dbSt,setDbSt]=useState("loading");
   const [lsav,setLsav]=useState(null);
+  const [resetMod,setResetMod]=useState(false);
   const ref=useRef({});
   const tmr=useRef(null);
   const showToast=useCallback((m,t="success")=>setToast({message:m,type:t,key:Date.now()}),[]);
@@ -551,13 +595,14 @@ function App(){
     return()=>{if(tmr.current) clearTimeout(tmr.current);};
   },[items,emps,movs,port,cats,units,init]);
 
-  const resetDb=useCallback(async()=>{
-    if(!confirm("Apagar TODOS os dados?")) return;
+  const doReset=useCallback(async()=>{
     await db.clearAll();
     setItems(iItems);setEmps(iEmps);setMovs(genMov());setPort(genPort());setCats(iCat);setUnits(iUni);
     ref.current={};setDbSt("saved");setLsav(new Date().toISOString());
+    setResetMod(false);
     showToast("Banco resetado!","warning");
   },[]);
+  const resetDb=useCallback(()=>setResetMod(true),[]);
 
   const crit=useMemo(()=>items.filter(i=>i.currentStock<=i.minStock),[items]);
   const totVal=useMemo(()=>items.reduce((s,i)=>s+i.currentStock*i.cost,0),[items]);
@@ -576,7 +621,7 @@ function App(){
     {id:"settings",label:"Configurações",IC:Ic.Cog},
   ];
 
-  const rp={items,setItems,employees:emps,setEmployees:setEmps,movements:movs,setMovements:setMovs,portioning:port,setPortioning:setPort,categories:cats,setCategories:setCats,units,setUnits,showToast,criticalItems:crit,totalValue:totVal,monthIn:thisM.filter(m=>m.type==="in").length,monthOut:thisM.filter(m=>m.type==="out").length,wasteMovements:waste,onResetDb:resetDb};
+  const rp={items,setItems,employees:emps,setEmployees:setEmps,movements:movs,setMovements:setMovs,portioning:port,setPortioning:setPort,categories:cats,setCategories:setCats,units,setUnits,showToast,criticalItems:crit,totalValue:totVal,monthIn:thisM.filter(m=>m.type==="in").length,monthOut:thisM.filter(m=>m.type==="out").length,wasteMovements:waste,onResetDb:resetDb,doReset};
 
   function renderTab(){
     switch(tab){
@@ -610,6 +655,19 @@ function App(){
     <div style={{display:"flex",height:"100vh",fontFamily:font,background:C.bg,color:C.text,overflow:"hidden"}}>
       <style>{"*{box-sizing:border-box;margin:0;padding:0}::-webkit-scrollbar{width:6px}::-webkit-scrollbar-thumb{background:"+C.border+";border-radius:3px}@keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}@keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}"}</style>
       {toast&&<Toast key={toast.key} message={toast.message} type={toast.type} onClose={()=>setToast(null)}/>}
+      <Modal open={resetMod} onClose={()=>setResetMod(false)} title="Resetar Banco de Dados" width={440}>
+        <div style={{background:C.dangerLight,borderRadius:12,padding:20,border:"1px solid "+C.danger,marginBottom:20,display:"flex",alignItems:"flex-start",gap:14}}>
+          <Ic.Warn size={28} color={C.danger} style={{flexShrink:0}}/>
+          <div>
+            <div style={{fontSize:15,fontWeight:700,color:C.danger,marginBottom:6}}>Atenção! Esta ação é irreversível.</div>
+            <div style={{fontSize:13,color:C.textSec,lineHeight:1.5}}>Todos os itens, movimentações, funcionários e configurações serão apagados e substituídos pelos dados iniciais de exemplo.</div>
+          </div>
+        </div>
+        <div style={{display:"flex",gap:12,justifyContent:"flex-end"}}>
+          <Btn variant="ghost" onClick={()=>setResetMod(false)}>Cancelar</Btn>
+          <Btn variant="danger" onClick={doReset} icon={<Ic.Trash size={16}/>}>Sim, resetar tudo</Btn>
+        </div>
+      </Modal>
 
       <aside style={{width:sb?240:64,background:C.text,color:"#fff",display:"flex",flexDirection:"column",transition:"width .3s ease",flexShrink:0,overflow:"hidden"}}>
         <div style={{padding:sb?"20px 16px 16px":"20px 11px 16px",borderBottom:"1px solid rgba(255,255,255,.08)",display:"flex",alignItems:"center",gap:10,minHeight:72}}>
@@ -621,11 +679,11 @@ function App(){
             const a=tab===t.id;
             return (
               <button key={t.id} onClick={()=>setTab(t.id)}
-                style={{display:"flex",alignItems:"center",gap:10,padding:sb?"10px 12px":"10px 0",borderRadius:8,border:"none",cursor:"pointer",fontFamily:font,fontSize:13,fontWeight:a?700:500,background:a?"rgba(194,69,45,.2)":"transparent",color:a?"#fff":"rgba(255,255,255,.55)",justifyContent:sb?"flex-start":"center",width:"100%",minHeight:40}}>
+                style={{position:"relative",display:"flex",alignItems:"center",gap:10,padding:sb?"10px 12px":"10px 0",borderRadius:8,border:"none",cursor:"pointer",fontFamily:font,fontSize:13,fontWeight:a?700:500,background:a?"rgba(194,69,45,.2)":"transparent",color:a?"#fff":"rgba(255,255,255,.55)",justifyContent:sb?"flex-start":"center",width:"100%",minHeight:40}}>
                 <span style={{flexShrink:0,display:"flex"}}><t.IC size={18}/></span>
                 {sb&&<span style={{whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{t.label}</span>}
-                {t.badge>0&&sb&&<span style={{marginLeft:"auto",background:C.danger,color:"#fff",borderRadius:10,padding:"2px 7px",fontSize:10,fontWeight:700}}>{t.badge}</span>}
-                {t.id==="items"&&crit.length>0&&sb&&<span style={{marginLeft:"auto",background:C.danger,color:"#fff",borderRadius:10,padding:"2px 7px",fontSize:10,fontWeight:700}}>{crit.length}</span>}
+                {t.badge>0&&(sb?<span style={{marginLeft:"auto",background:C.danger,color:"#fff",borderRadius:10,padding:"2px 7px",fontSize:10,fontWeight:700}}>{t.badge}</span>:<span style={{position:"absolute",top:4,right:4,width:8,height:8,borderRadius:4,background:C.danger,border:"1px solid "+C.text}}/>)}
+                {t.id==="items"&&crit.length>0&&(sb?<span style={{marginLeft:"auto",background:C.danger,color:"#fff",borderRadius:10,padding:"2px 7px",fontSize:10,fontWeight:700}}>{crit.length}</span>:<span style={{position:"absolute",top:4,right:4,width:8,height:8,borderRadius:4,background:C.danger,border:"1px solid "+C.text}}/>)}
               </button>
             );
           })}
@@ -823,12 +881,22 @@ function InTab({items,setItems,employees,movements,setMovements,showToast}){
     if(!f.itemId||!f.quantity||!f.employee||!f.price){showToast("Preencha todos os campos","error");return;}
     const qty=Number(f.quantity),pr=Number(f.price);
     if(isNaN(qty)||qty<=0||isNaN(pr)||pr<0){showToast("Valores inválidos","error");return;}
+    if(f.date>today()){showToast("Data não pode ser futura","error");return;}
     setSav(true);await new Promise(r=>setTimeout(r,300));
     if(ed){
-      // Reverte a quantidade antiga e aplica a nova no estoque
-      const diff=qty-ed.quantity;
+      // Se o item mudou, reverte estoque do item antigo e adiciona no novo
+      const itemMudou=ed.itemId!==Number(f.itemId);
       setMovements(prev=>prev.map(m=>m.id===ed.id?{...m,...f,itemId:Number(f.itemId),itemName:sel.name,quantity:qty,price:pr,batch:f.batch,expiry:f.expiry||null}:m));
-      setItems(prev=>prev.map(i=>i.id===Number(f.itemId)?{...i,currentStock:i.currentStock+diff}:i));
+      if(itemMudou){
+        setItems(prev=>prev.map(i=>{
+          if(i.id===ed.itemId) return {...i,currentStock:Math.max(0,i.currentStock-ed.quantity)};
+          if(i.id===Number(f.itemId)) return {...i,currentStock:i.currentStock+qty};
+          return i;
+        }));
+      } else {
+        const diff=qty-ed.quantity;
+        setItems(prev=>prev.map(i=>i.id===Number(f.itemId)?{...i,currentStock:i.currentStock+diff}:i));
+      }
       showToast("Entrada atualizada!");
     } else {
       setMovements(prev=>[...prev,{id:nid(movements),type:"in",itemId:Number(f.itemId),itemName:sel.name,quantity:qty,date:f.date,time:f.time,employee:f.employee,supplier:f.supplier||sel.supplier,price:pr,batch:f.batch,expiry:f.expiry||null,notes:"",invoice:null,reason:null,wasteReason:null}]);
@@ -960,12 +1028,22 @@ function OutTab({items,setItems,employees,movements,setMovements,showToast}){
     if(f.reason==="Perda/Desperdício"&&!f.wasteReason){showToast("Selecione a causa","error");return;}
     const qty=Number(f.quantity);
     if(isNaN(qty)||qty<=0){showToast("Quantidade inválida","error");return;}
+    if(f.date>today()){showToast("Data não pode ser futura","error");return;}
     setSav(true);await new Promise(r=>setTimeout(r,300));
     if(ed){
-      // Reverte qtd antiga (devolve ao estoque) e subtrai nova
-      const diff=ed.quantity-qty;
+      // Se o item mudou, devolve estoque ao item antigo e subtrai do novo
+      const itemMudou=ed.itemId!==Number(f.itemId);
       setMovements(prev=>prev.map(m=>m.id===ed.id?{...m,itemId:Number(f.itemId),itemName:sel.name,quantity:qty,date:f.date,time:f.time,employee:f.employee,reason:f.reason,wasteReason:f.wasteReason||null}:m));
-      setItems(prev=>prev.map(i=>i.id===Number(f.itemId)?{...i,currentStock:i.currentStock+diff}:i));
+      if(itemMudou){
+        setItems(prev=>prev.map(i=>{
+          if(i.id===ed.itemId) return {...i,currentStock:i.currentStock+ed.quantity};
+          if(i.id===Number(f.itemId)) return {...i,currentStock:Math.max(0,i.currentStock-qty)};
+          return i;
+        }));
+      } else {
+        const diff=ed.quantity-qty;
+        setItems(prev=>prev.map(i=>i.id===Number(f.itemId)?{...i,currentStock:i.currentStock+diff}:i));
+      }
       showToast("Saída atualizada!");
     } else {
       if(qty>sel.currentStock){showToast("Insuficiente! Disponível: "+sel.currentStock,"error");setSav(false);return;}
@@ -1136,6 +1214,7 @@ function PortTab({items,setItems,employees,portioning,setPortioning,showToast}){
     if(!f.itemId||!f.quantity||!f.employee){showToast("Preencha todos os campos","error");return;}
     const qty=Number(f.quantity);
     if(isNaN(qty)||qty<=0){showToast("Quantidade inválida","error");return;}
+    if(f.date>today()){showToast("Data não pode ser futura","error");return;}
     setSav(true);await new Promise(r=>setTimeout(r,300));
     if(ed){
       const diff=ed.quantity-qty; // positivo = devolve estoque, negativo = consome mais
@@ -1272,13 +1351,13 @@ function EmpTab({employees,setEmployees,showToast}){
 // ===== RELATÓRIOS =====
 function RepTab({items,movements}){
   const [type,setType]=useState("stock");
-  const reps=[{id:"stock",label:"Estoque Atual",IC:Ic.Box},{id:"movements",label:"Movimentações",IC:Ic.Spin},{id:"critical",label:"Itens Críticos",IC:Ic.Warn}];
+  const reps=[{id:"stock",label:"Estoque Atual",IC:Ic.Box},{id:"movements",label:"Movimentações",IC:Ic.Doc},{id:"critical",label:"Itens Críticos",IC:Ic.Warn}];
 
   function dl(){
     if(typeof window.XLSX==="undefined") return;
     let d=[],fn="";
     if(type==="stock"){d=items.map(i=>({Item:i.name,Categoria:i.category,Unidade:i.unit,Estoque:i.currentStock,Mínimo:i.minStock,Custo:i.cost,Total:(i.currentStock*i.cost).toFixed(2)}));fn="estoque.xlsx";}
-    else if(type==="movements"){d=movements.slice(-100).map(m=>({Tipo:m.type==="in"?"Entrada":"Saída",Data:fmtDate(m.date),Item:m.itemName,Qtd:m.quantity,Resp:m.employee}));fn="movimentacoes.xlsx";}
+    else if(type==="movements"){d=movements.map(m=>({Tipo:m.type==="in"?"Entrada":"Saída",Data:fmtDate(m.date),Item:m.itemName,Qtd:m.quantity,Resp:m.employee}));fn="movimentacoes.xlsx";}
     else{d=items.filter(i=>i.currentStock<=i.minStock).map(i=>({Item:i.name,Estoque:i.currentStock,Mínimo:i.minStock,Déficit:i.minStock-i.currentStock}));fn="criticos.xlsx";}
     if(d.length){const ws=window.XLSX.utils.json_to_sheet(d);const wb=window.XLSX.utils.book_new();window.XLSX.utils.book_append_sheet(wb,ws,"Relatório");window.XLSX.writeFile(wb,fn);}
   }
@@ -1295,7 +1374,14 @@ function RepTab({items,movements}){
         <Btn onClick={dl} variant="secondary" icon={<Ic.Dl size={16}/>}>Exportar Excel</Btn>
       </div>
       <Card>
-        <div style={{padding:"16px 20px",borderBottom:"1px solid "+C.border}}><h3 style={{fontSize:16,fontWeight:700,fontFamily:fontD}}>{reps.find(r=>r.id===type)?.label}</h3></div>
+        <div style={{padding:"16px 20px",borderBottom:"1px solid "+C.border,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+          <h3 style={{fontSize:16,fontWeight:700,fontFamily:fontD}}>{reps.find(r=>r.id===type)?.label}</h3>
+          <span style={{fontSize:12,color:C.textMuted,fontFamily:font}}>
+            {type==="stock"&&fmtN(items.length)+" itens"}
+            {type==="movements"&&fmtN(movements.length)+" movimentações"}
+            {type==="critical"&&fmtN(items.filter(i=>i.currentStock<=i.minStock).length)+" críticos"}
+          </span>
+        </div>
         {type==="stock"&&<DT columns={[{key:"name",label:"Item",render:v=><span style={{fontWeight:600}}>{v}</span>},{key:"category",label:"Categoria"},{key:"currentStock",label:"Estoque",render:(v,r)=><span style={{fontWeight:700,color:v<=r.minStock?C.danger:C.success}}>{v}</span>},{key:"minStock",label:"Mínimo"},{key:"cost",label:"Valor Total",render:(v,r)=>fmt(r.currentStock*v),nowrap:true}]} data={items}/>}
         {type==="movements"&&<DT columns={[{key:"type",label:"Tipo",render:v=>v==="in"?<Badge color={C.success} bg={C.successLight}>Entrada</Badge>:<Badge color={C.danger} bg={C.dangerLight}>Saída</Badge>},{key:"date",label:"Data",render:(v,r)=>fmtDate(v)+" "+r.time,nowrap:true},{key:"itemName",label:"Item"},{key:"quantity",label:"Qtd"},{key:"employee",label:"Responsável"}]} data={movements.slice().reverse()}/>}
         {type==="critical"&&<DT columns={[{key:"name",label:"Item",render:v=><span style={{fontWeight:600}}>{v}</span>},{key:"currentStock",label:"Estoque",render:v=><span style={{color:C.danger,fontWeight:700}}>{v}</span>},{key:"minStock",label:"Mínimo"},{key:"supplier",label:"Fornecedor",render:v=>v||"—"}]} data={items.filter(i=>i.currentStock<=i.minStock)}/>}
@@ -1305,9 +1391,27 @@ function RepTab({items,movements}){
 }
 
 // ===== CONFIGURAÇÕES =====
-function SettTab({categories,setCategories,units,setUnits,showToast,onResetDb}){
+function SettTab({categories,setCategories,units,setUnits,items,showToast,onResetDb}){
   const [nc,setNc]=useState("");
   const [nu,setNu]=useState("");
+  const [confirmDel,setConfirmDel]=useState(null); // {type:'cat'|'unit', value, count}
+
+  function tryRemoveCat(cat){
+    const count=items.filter(i=>i.category===cat).length;
+    if(count>0){setConfirmDel({type:"cat",value:cat,count});return;}
+    setCategories(categories.filter(x=>x!==cat));showToast("Categoria removida","warning");
+  }
+  function tryRemoveUnit(unit){
+    const count=items.filter(i=>i.unit===unit).length;
+    if(count>0){setConfirmDel({type:"unit",value:unit,count});return;}
+    setUnits(units.filter(x=>x!==unit));showToast("Unidade removida","warning");
+  }
+  function confirmRemove(){
+    if(!confirmDel) return;
+    if(confirmDel.type==="cat") setCategories(categories.filter(x=>x!==confirmDel.value));
+    else setUnits(units.filter(x=>x!==confirmDel.value));
+    showToast("Removida","warning");setConfirmDel(null);
+  }
 
   function addC(){
     const t=nc.trim();if(!t) return;
@@ -1329,12 +1433,13 @@ function SettTab({categories,setCategories,units,setUnits,showToast,onResetDb}){
           <Btn onClick={addC} icon={<Ic.Plus size={16}/>}>Adicionar</Btn>
         </div>
         <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-          {categories.map(c=>(
+          {categories.map(c=>{const n=items.filter(i=>i.category===c).length;return(
             <div key={c} style={{display:"flex",alignItems:"center",gap:6,padding:"6px 12px",background:C.bg,borderRadius:8,border:"1px solid "+C.border}}>
               <span style={{fontSize:13}}>{c}</span>
-              <Ic.Close size={14} color={C.danger} style={{cursor:"pointer"}} onClick={()=>{setCategories(categories.filter(x=>x!==c));showToast("Removida","warning");}}/>
+              {n>0&&<span style={{fontSize:10,color:C.textMuted,background:C.border,borderRadius:10,padding:"1px 6px"}}>{n}</span>}
+              <Ic.Close size={14} color={C.danger} style={{cursor:"pointer"}} onClick={()=>tryRemoveCat(c)}/>
             </div>
-          ))}
+          );})}
         </div>
       </Card>
       <Card style={{padding:24}}>
@@ -1344,12 +1449,13 @@ function SettTab({categories,setCategories,units,setUnits,showToast,onResetDb}){
           <Btn onClick={addU} icon={<Ic.Plus size={16}/>}>Adicionar</Btn>
         </div>
         <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-          {units.map(u=>(
+          {units.map(u=>{const n=items.filter(i=>i.unit===u).length;return(
             <div key={u} style={{display:"flex",alignItems:"center",gap:6,padding:"6px 12px",background:C.bg,borderRadius:8,border:"1px solid "+C.border}}>
               <span style={{fontSize:13}}>{u}</span>
-              <Ic.Close size={14} color={C.danger} style={{cursor:"pointer"}} onClick={()=>{setUnits(units.filter(x=>x!==u));showToast("Removida","warning");}}/>
+              {n>0&&<span style={{fontSize:10,color:C.textMuted,background:C.border,borderRadius:10,padding:"1px 6px"}}>{n}</span>}
+              <Ic.Close size={14} color={C.danger} style={{cursor:"pointer"}} onClick={()=>tryRemoveUnit(u)}/>
             </div>
-          ))}
+          );})}
         </div>
       </Card>
       <Card style={{padding:24,border:"2px solid "+C.dangerLight}}>
@@ -1360,6 +1466,28 @@ function SettTab({categories,setCategories,units,setUnits,showToast,onResetDb}){
         <p style={{fontSize:13,color:C.textSec,marginBottom:16}}>Apaga todos os dados e restaura valores iniciais.</p>
         <Btn variant="danger" onClick={onResetDb} icon={<Ic.Trash size={16}/>}>Resetar Banco de Dados</Btn>
       </Card>
+      {/* Modal confirmação remoção cat/unit em uso */}
+      <Modal open={!!confirmDel} onClose={()=>setConfirmDel(null)} title="Confirmar Remoção" width={420}>
+        {confirmDel&&(
+          <>
+            <div style={{background:C.warningLight,borderRadius:10,padding:16,border:"1px solid "+C.warning,marginBottom:20,display:"flex",gap:12,alignItems:"flex-start"}}>
+              <Ic.Warn size={22} color={C.warning}/>
+              <div>
+                <div style={{fontSize:14,fontWeight:700,color:C.text,marginBottom:4}}>
+                  "{confirmDel.value}" está em uso por {confirmDel.count} item{confirmDel.count>1?"ns":""}
+                </div>
+                <div style={{fontSize:13,color:C.textSec}}>
+                  Os itens que usam {confirmDel.type==="cat"?"essa categoria":"essa unidade"} ficarão com valor inválido. Deseja continuar?
+                </div>
+              </div>
+            </div>
+            <div style={{display:"flex",gap:12,justifyContent:"flex-end"}}>
+              <Btn variant="ghost" onClick={()=>setConfirmDel(null)}>Cancelar</Btn>
+              <Btn variant="danger" onClick={confirmRemove} icon={<Ic.Trash size={16}/>}>Remover mesmo assim</Btn>
+            </div>
+          </>
+        )}
+      </Modal>
     </div>
   );
 }
