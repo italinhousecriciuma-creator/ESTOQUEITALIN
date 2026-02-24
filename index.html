@@ -1437,7 +1437,7 @@ function SettTab({categories,setCategories,units,setUnits,items,showToast,onRese
             <div key={c} style={{display:"flex",alignItems:"center",gap:6,padding:"6px 12px",background:C.bg,borderRadius:8,border:"1px solid "+C.border}}>
               <span style={{fontSize:13}}>{c}</span>
               {n>0&&<span style={{fontSize:10,color:C.textMuted,background:C.border,borderRadius:10,padding:"1px 6px"}}>{n}</span>}
-              <Ic.Close size={14} color={C.danger} style={{cursor:"pointer"}} onClick={()=>tryRemoveCat(c)}/>
+              <div onClick={()=>tryRemoveCat(c)} style={{cursor:"pointer",display:"flex",alignItems:"center"}}><Ic.Close size={14} color={C.danger}/></div>
             </div>
           );})}
         </div>
@@ -1453,7 +1453,7 @@ function SettTab({categories,setCategories,units,setUnits,items,showToast,onRese
             <div key={u} style={{display:"flex",alignItems:"center",gap:6,padding:"6px 12px",background:C.bg,borderRadius:8,border:"1px solid "+C.border}}>
               <span style={{fontSize:13}}>{u}</span>
               {n>0&&<span style={{fontSize:10,color:C.textMuted,background:C.border,borderRadius:10,padding:"1px 6px"}}>{n}</span>}
-              <Ic.Close size={14} color={C.danger} style={{cursor:"pointer"}} onClick={()=>tryRemoveUnit(u)}/>
+              <div onClick={()=>tryRemoveUnit(u)} style={{cursor:"pointer",display:"flex",alignItems:"center"}}><Ic.Close size={14} color={C.danger}/></div>
             </div>
           );})}
         </div>
