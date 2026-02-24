@@ -319,12 +319,17 @@ function DbStatus({status,lastSaved}){
   );
 }
 
-function DT({columns,data,onEdit,onDelete,actions,pageSize=PG}){
+function DT({columns,data,onEdit,onDelete,actions,onBulkDelete,pageSize=PG}){
   const [page,setPage]=useState(1);
   const [sk,setSk]=useState(null);
   const [sd,setSd]=useState("asc");
+  const [sel,setSel]=useState(new Set());
+  const [bulkDm,setBulkDm]=useState(false);
   const hasA=onEdit||onDelete||actions;
-  useEffect(()=>{setPage(1);},[data.length]);
+  const hasBulk=!!onBulkDelete;
+
+  useEffect(()=>{setPage(1);setSel(new Set());},[data.length]);
+
   const sorted=useMemo(()=>{
     if(!sk) return data;
     return [...data].sort((a,b)=>{
@@ -336,15 +341,70 @@ function DT({columns,data,onEdit,onDelete,actions,pageSize=PG}){
       return sd==="asc"?c:-c;
     });
   },[data,sk,sd]);
+
   const tot=Math.ceil(sorted.length/pageSize);
   const paged=sorted.slice((page-1)*pageSize,page*pageSize);
   const doSort=k=>{if(sk===k){setSd(d=>d==="asc"?"desc":"asc");}else{setSk(k);setSd("asc");}};
+
+  const allPageIds=paged.map(r=>r.id??r);
+  const allPageSel=allPageIds.length>0&&allPageIds.every(id=>sel.has(id));
+  const somePageSel=allPageIds.some(id=>sel.has(id));
+
+  function toggleRow(id){
+    setSel(prev=>{const n=new Set(prev);n.has(id)?n.delete(id):n.add(id);return n;});
+  }
+  function togglePage(){
+    setSel(prev=>{
+      const n=new Set(prev);
+      if(allPageSel){allPageIds.forEach(id=>n.delete(id));}
+      else{allPageIds.forEach(id=>n.add(id));}
+      return n;
+    });
+  }
+  function selectAll(){setSel(new Set(sorted.map(r=>r.id??r)));}
+  function clearSel(){setSel(new Set());}
+
+  function doBulkDelete(){
+    onBulkDelete([...sel]);
+    setSel(new Set());
+    setBulkDm(false);
+  }
+
+  const colCount=columns.length+(hasBulk?1:0)+(hasA?1:0);
+
   return (
     <div>
+      {/* Barra de seleção múltipla */}
+      {hasBulk&&sel.size>0&&(
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"10px 14px",background:"linear-gradient(90deg,"+C.primaryLight+","+C.warningLight+")",borderBottom:"1px solid "+C.border,flexWrap:"wrap",gap:8}}>
+          <div style={{display:"flex",alignItems:"center",gap:10}}>
+            <span style={{fontSize:13,fontWeight:700,color:C.primary}}>{sel.size} selecionado{sel.size>1?"s":""}</span>
+            {sel.size<sorted.length&&(
+              <button onClick={selectAll} style={{fontSize:12,color:C.primary,background:"none",border:"none",cursor:"pointer",textDecoration:"underline",fontFamily:font}}>
+                Selecionar todos ({sorted.length})
+              </button>
+            )}
+            <button onClick={clearSel} style={{fontSize:12,color:C.textMuted,background:"none",border:"none",cursor:"pointer",textDecoration:"underline",fontFamily:font}}>
+              Limpar seleção
+            </button>
+          </div>
+          <Btn variant="danger" size="sm" onClick={()=>setBulkDm(true)} icon={<Ic.Trash size={14}/>}>
+            Excluir {sel.size} item{sel.size>1?"s":""}
+          </Btn>
+        </div>
+      )}
+
       <div style={{overflowX:"auto"}}>
         <table style={{width:"100%",borderCollapse:"collapse",fontFamily:font}}>
           <thead>
             <tr>
+              {hasBulk&&(
+                <th style={{padding:"12px 14px",width:40,borderBottom:"2px solid "+C.border}}>
+                  <input type="checkbox" checked={allPageSel} ref={el=>{if(el)el.indeterminate=somePageSel&&!allPageSel;}}
+                    onChange={togglePage}
+                    style={{width:16,height:16,cursor:"pointer",accentColor:C.primary}}/>
+                </th>
+              )}
               {columns.map(c=>(
                 <th key={c.key} onClick={()=>!c.noSort&&doSort(c.key)}
                   style={{padding:"12px 14px",textAlign:"left",fontSize:11,fontWeight:700,color:C.textMuted,textTransform:"uppercase",letterSpacing:.8,borderBottom:"2px solid "+C.border,whiteSpace:"nowrap",cursor:c.noSort?"default":"pointer",userSelect:"none"}}>
@@ -359,34 +419,48 @@ function DT({columns,data,onEdit,onDelete,actions,pageSize=PG}){
           </thead>
           <tbody>
             {paged.length===0
-              ?<tr><td colSpan={columns.length+(hasA?1:0)} style={{padding:48,textAlign:"center",color:C.textMuted,fontSize:14}}>Nenhum registro</td></tr>
-              :paged.map((row,i)=>(
-                <tr key={row.id??i} style={{borderBottom:"1px solid "+C.border}}
-                  onMouseEnter={e=>e.currentTarget.style.background=C.bg}
-                  onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
-                  {columns.map(c=>(
-                    <td key={c.key} style={{padding:"12px 14px",fontSize:13.5,color:C.text,whiteSpace:c.nowrap?"nowrap":"normal"}}>
-                      {c.render?c.render(row[c.key],row):(row[c.key]??"—")}
-                    </td>
-                  ))}
-                  {hasA&&(
-                    <td style={{padding:"12px 14px",textAlign:"right",whiteSpace:"nowrap"}}>
-                      <div style={{display:"flex",gap:4,justifyContent:"flex-end"}}>
-                        {actions&&actions(row)}
-                        {onEdit&&<Btn variant="ghost" size="sm" onClick={()=>onEdit(row)} icon={<Ic.Edit size={14}/>}/>}
-                        {onDelete&&<Btn variant="ghost" size="sm" onClick={()=>onDelete(row)} icon={<Ic.Trash size={14} color={C.danger}/>}/>}
-                      </div>
-                    </td>
-                  )}
-                </tr>
-              ))
+              ?<tr><td colSpan={colCount} style={{padding:48,textAlign:"center",color:C.textMuted,fontSize:14}}>Nenhum registro</td></tr>
+              :paged.map((row,i)=>{
+                const rid=row.id??i;
+                const isSel=sel.has(rid);
+                return (
+                  <tr key={rid} style={{borderBottom:"1px solid "+C.border,background:isSel?"rgba(194,69,45,0.04)":"transparent"}}
+                    onMouseEnter={e=>{if(!isSel)e.currentTarget.style.background=C.bg;}}
+                    onMouseLeave={e=>{e.currentTarget.style.background=isSel?"rgba(194,69,45,0.04)":"transparent";}}>
+                    {hasBulk&&(
+                      <td style={{padding:"12px 14px",width:40}}>
+                        <input type="checkbox" checked={isSel} onChange={()=>toggleRow(rid)}
+                          style={{width:16,height:16,cursor:"pointer",accentColor:C.primary}}/>
+                      </td>
+                    )}
+                    {columns.map(c=>(
+                      <td key={c.key} style={{padding:"12px 14px",fontSize:13.5,color:C.text,whiteSpace:c.nowrap?"nowrap":"normal"}}>
+                        {c.render?c.render(row[c.key],row):(row[c.key]??"—")}
+                      </td>
+                    ))}
+                    {hasA&&(
+                      <td style={{padding:"12px 14px",textAlign:"right",whiteSpace:"nowrap"}}>
+                        <div style={{display:"flex",gap:4,justifyContent:"flex-end"}}>
+                          {actions&&actions(row)}
+                          {onEdit&&<Btn variant="ghost" size="sm" onClick={()=>onEdit(row)} icon={<Ic.Edit size={14}/>}/>}
+                          {onDelete&&<Btn variant="ghost" size="sm" onClick={()=>onDelete(row)} icon={<Ic.Trash size={14} color={C.danger}/>}/>}
+                        </div>
+                      </td>
+                    )}
+                  </tr>
+                );
+              })
             }
           </tbody>
         </table>
       </div>
-      {tot>1&&(
-        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"16px 14px",borderTop:"1px solid "+C.border,flexWrap:"wrap",gap:12}}>
-          <div style={{fontSize:13,color:C.textMuted}}>Mostrando {(page-1)*pageSize+1}–{Math.min(page*pageSize,sorted.length)} de {sorted.length}</div>
+
+      {/* Paginação */}
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 14px",borderTop:"1px solid "+C.border,flexWrap:"wrap",gap:8}}>
+        <div style={{fontSize:13,color:C.textMuted}}>
+          {sorted.length>0?`Mostrando ${(page-1)*pageSize+1}–${Math.min(page*pageSize,sorted.length)} de ${sorted.length}`:""}
+        </div>
+        {tot>1&&(
           <div style={{display:"flex",alignItems:"center",gap:4}}>
             <Btn variant="ghost" size="sm" onClick={()=>setPage(1)} disabled={page===1} icon={<Ic.CLL size={16}/>}/>
             <Btn variant="ghost" size="sm" onClick={()=>setPage(p=>p-1)} disabled={page===1} icon={<Ic.ChL size={16}/>}/>
@@ -394,8 +468,23 @@ function DT({columns,data,onEdit,onDelete,actions,pageSize=PG}){
             <Btn variant="ghost" size="sm" onClick={()=>setPage(p=>p+1)} disabled={page===tot} icon={<Ic.ChR size={16}/>}/>
             <Btn variant="ghost" size="sm" onClick={()=>setPage(tot)} disabled={page===tot} icon={<Ic.CRR size={16}/>}/>
           </div>
+        )}
+      </div>
+
+      {/* Modal confirmação bulk delete */}
+      <Modal open={bulkDm} onClose={()=>setBulkDm(false)} title="Excluir Selecionados" width={420}>
+        <div style={{background:C.dangerLight,borderRadius:10,padding:16,border:"1px solid "+C.danger,marginBottom:20,display:"flex",alignItems:"center",gap:12}}>
+          <Ic.Warn size={24} color={C.danger}/>
+          <div>
+            <div style={{fontSize:15,fontWeight:700,color:C.danger}}>{sel.size} registro{sel.size>1?"s":""} serão excluídos</div>
+            <div style={{fontSize:12,color:C.textSec,marginTop:4}}>Esta ação não pode ser desfeita.</div>
+          </div>
         </div>
-      )}
+        <div style={{display:"flex",gap:12,justifyContent:"flex-end"}}>
+          <Btn variant="ghost" onClick={()=>setBulkDm(false)}>Cancelar</Btn>
+          <Btn variant="danger" onClick={doBulkDelete} icon={<Ic.Trash size={16}/>}>Excluir {sel.size} item{sel.size>1?"s":""}</Btn>
+        </div>
+      </Modal>
     </div>
   );
 }
@@ -667,7 +756,13 @@ function ItemsTab({items,setItems,categories,units,showToast}){
           {key:"cost",label:"Custo",render:v=>fmt(v),nowrap:true},
         ]} data={filt}
           onEdit={r=>{setEd(r);setF({name:r.name,unit:r.unit,category:r.category,minStock:String(r.minStock),cost:String(r.cost),supplier:r.supplier||""});setMod(true);}}
-          onDelete={r=>{setTd(r);setDm(true);}}/>
+          onDelete={r=>{setTd(r);setDm(true);}}
+          onBulkDelete={async ids=>{
+            const novos=items.filter(i=>!ids.includes(i.id));
+            setItems(novos);
+            await db.save(DB_KEYS.items,novos);
+            showToast(ids.length+" item(ns) excluído(s)","warning");
+          }}/>
       </Card>
       <Modal open={mod} onClose={()=>!sav&&setMod(false)} title={ed?"Editar Item":"Novo Item"}>
         <Inp label="Nome" required value={f.name} onChange={e=>setF({...f,name:e.target.value})}/>
@@ -766,7 +861,16 @@ function InTab({items,setItems,employees,movements,setMovements,showToast}){
           {key:"supplier",label:"Fornecedor",render:v=>v||"—"},
           {key:"price",label:"Preço",render:v=>v?fmt(v):"—",nowrap:true},
           {key:"employee",label:"Responsável"},
-        ]} data={filt} onEdit={openEdit} onDelete={r=>{setTd(r);setDm(true);}}/>
+        ]} data={filt} onEdit={openEdit} onDelete={r=>{setTd(r);setDm(true);}}
+          onBulkDelete={ids=>{
+            const removidos=movements.filter(m=>ids.includes(m.id));
+            // Reverte estoque de cada entrada removida
+            let novosItems=[...items];
+            removidos.forEach(m=>{novosItems=novosItems.map(i=>i.id===m.itemId?{...i,currentStock:Math.max(0,i.currentStock-m.quantity)}:i);});
+            const novosMov=movements.filter(m=>!ids.includes(m.id));
+            setMovements(novosMov);setItems(novosItems);
+            showToast(ids.length+" entrada(s) excluída(s)","warning");
+          }}/>
       </Card>
 
       {/* Modal criar/editar */}
@@ -893,7 +997,16 @@ function OutTab({items,setItems,employees,movements,setMovements,showToast}){
           {key:"quantity",label:"Qtd",render:v=><Badge color={C.danger} bg={C.dangerLight}>-{v}</Badge>},
           {key:"reason",label:"Motivo"},
           {key:"employee",label:"Responsável"},
-        ]} data={filt} onEdit={openEdit} onDelete={r=>{setTd(r);setDm(true);}}/>
+        ]} data={filt} onEdit={openEdit} onDelete={r=>{setTd(r);setDm(true);}}
+          onBulkDelete={ids=>{
+            const removidos=movements.filter(m=>ids.includes(m.id));
+            // Devolve estoque de cada saída removida
+            let novosItems=[...items];
+            removidos.forEach(m=>{novosItems=novosItems.map(i=>i.id===m.itemId?{...i,currentStock:i.currentStock+m.quantity}:i);});
+            const novosMov=movements.filter(m=>!ids.includes(m.id));
+            setMovements(novosMov);setItems(novosItems);
+            showToast(ids.length+" saída(s) excluída(s)","warning");
+          }}/>
       </Card>
 
       {/* Modal criar/editar */}
@@ -954,7 +1067,7 @@ function OutTab({items,setItems,employees,movements,setMovements,showToast}){
 }
 
 // ===== DESPERDÍCIO =====
-function WasteTab({wasteMovements,items}){
+function WasteTab({wasteMovements,items,setItems,movements,setMovements,showToast}){
   const [q,setQ]=useState("");
   const df0=()=>{const d=new Date();d.setDate(d.getDate()-30);return d.toISOString().split("T")[0];};
   const [df,setDf]=useState(df0);
@@ -985,7 +1098,16 @@ function WasteTab({wasteMovements,items}){
           {key:"quantity",label:"Qtd",render:v=><Badge color={C.danger} bg={C.dangerLight}>{v}</Badge>},
           {key:"wasteReason",label:"Causa",render:v=>v||"—"},
           {key:"employee",label:"Responsável"},
-        ]} data={filt}/>
+        ]} data={filt}
+          onBulkDelete={ids=>{
+            const removidos=movements.filter(m=>ids.includes(m.id));
+            // Devolve estoque de cada desperdício removido
+            let novosItems=[...items];
+            removidos.forEach(m=>{novosItems=novosItems.map(i=>i.id===m.itemId?{...i,currentStock:i.currentStock+m.quantity}:i);});
+            const novosMov=movements.filter(m=>!ids.includes(m.id));
+            setMovements(novosMov);setItems(novosItems);
+            showToast(ids.length+" desperdício(s) excluído(s)","warning");
+          }}/>
       </Card>
     </div>
   );
@@ -1048,7 +1170,16 @@ function PortTab({items,setItems,employees,portioning,setPortioning,showToast}){
           {key:"itemName",label:"Item",render:v=><span style={{fontWeight:600}}>{v}</span>},
           {key:"quantity",label:"Quantidade",render:v=><Badge color={C.accent} bg={C.accentLight}>{v}</Badge>},
           {key:"employee",label:"Responsável"},
-        ]} data={filt} onEdit={openEdit} onDelete={r=>{setTd(r);setDm(true);}}/>
+        ]} data={filt} onEdit={openEdit} onDelete={r=>{setTd(r);setDm(true);}}
+          onBulkDelete={ids=>{
+            const removidos=portioning.filter(p=>ids.includes(p.id));
+            // Devolve estoque de cada porcionamento removido
+            let novosItems=[...items];
+            removidos.forEach(p=>{novosItems=novosItems.map(i=>i.id===p.itemId?{...i,currentStock:i.currentStock+p.quantity}:i);});
+            const novosPort=portioning.filter(p=>!ids.includes(p.id));
+            setPortioning(novosPort);setItems(novosItems);
+            showToast(ids.length+" porcionamento(s) excluído(s)","warning");
+          }}/>
       </Card>
 
       {/* Modal criar/editar */}
