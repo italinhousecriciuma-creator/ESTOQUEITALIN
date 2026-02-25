@@ -1224,14 +1224,14 @@ function BarChart({data,color=C.accent,height=180}){
   if(!data||data.length===0) return <div style={{height,display:"flex",alignItems:"center",justifyContent:"center",color:C.textMuted,fontSize:13}}>Sem dados no período</div>;
   const maxV=Math.max(...data.map(d=>d.value),1);
   return(
-    <div style={{display:"flex",alignItems:"flex-end",gap:6,height,padding:"0 4px"}}>
+    <div style={{display:"flex",alignItems:"flex-end",gap:4,height,padding:"0 4px",overflowX:"auto"}}>
       {data.map((d,i)=>{
         const pct=d.value/maxV;
         return(
-          <div key={i} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:4,height:"100%",justifyContent:"flex-end"}}>
-            <span style={{fontSize:10,color:C.textMuted,fontWeight:600}}>{d.value>0?fmtN(d.value):""}</span>
-            <div title={d.label+": "+fmtN(d.value)} style={{width:"100%",background:color,borderRadius:"4px 4px 0 0",height:Math.max(pct*140,d.value>0?4:0),transition:"height .3s ease",cursor:"default",minWidth:8}}/>
-            <span style={{fontSize:10,color:C.textMuted,textAlign:"center",lineHeight:1.2,maxWidth:40,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{d.label}</span>
+          <div key={i} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:4,height:"100%",justifyContent:"flex-end",minWidth:18}}>
+            <span style={{fontSize:9,color:C.textMuted,fontWeight:600,lineHeight:1}}>{d.value>0?fmtN(d.value):""}</span>
+            <div title={d.label+": "+fmtN(d.value)} style={{width:"100%",background:color,borderRadius:"4px 4px 0 0",height:Math.max(pct*140,d.value>0?4:0),transition:"height .3s ease",cursor:"default"}}/>
+            <span style={{fontSize:9,color:C.textMuted,textAlign:"center",lineHeight:1.2,width:"100%",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{d.label}</span>
           </div>
         );
       })}
@@ -1239,87 +1239,60 @@ function BarChart({data,color=C.accent,height=180}){
   );
 }
 
-function HBarChart({data,color=C.accent}){
-  if(!data||data.length===0) return <div style={{padding:20,color:C.textMuted,fontSize:13,textAlign:"center"}}>Sem dados</div>;
-  const maxV=Math.max(...data.map(d=>d.value),1);
-  return(
-    <div style={{display:"flex",flexDirection:"column",gap:10}}>
-      {data.map((d,i)=>(
-        <div key={i} style={{display:"flex",alignItems:"center",gap:10}}>
-          <div style={{width:120,fontSize:13,fontWeight:600,color:C.text,flexShrink:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}} title={d.label}>{d.label}</div>
-          <div style={{flex:1,background:C.border,borderRadius:4,overflow:"hidden",height:20}}>
-            <div style={{width:(d.value/maxV*100)+"%",background:color,height:"100%",borderRadius:4,transition:"width .4s ease",display:"flex",alignItems:"center",paddingLeft:6,boxSizing:"border-box"}}/>
-          </div>
-          <div style={{width:50,fontSize:13,fontWeight:700,color:C.text,textAlign:"right",flexShrink:0}}>{fmtN(d.value)}</div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
 function PortTab({items,employees,portioning,setPortioning,showToast}){
-  const [view,setView]=useState("dash"); // "dash" | "list"
   const [q,setQ]=useState("");
   const [mod,setMod]=useState(false);
   const [dm,setDm]=useState(false);
   const [td,setTd]=useState(null);
   const [ed,setEd]=useState(null);
   const [sav,setSav]=useState(false);
-  const [period,setPeriod]=useState("30");
+  // Filtro de data — padrão: últimos 30 dias
+  const df30=()=>{const d=new Date();d.setDate(d.getDate()-30);return d.toISOString().split("T")[0];};
+  const [df,setDf]=useState(df30);
+  const [dt,setDt]=useState(today());
   const ef={itemId:"",quantity:"",employee:"",date:today(),time:nowT()};
   const [f,setF]=useState(ef);
   const sel=items.find(i=>i.id===Number(f.itemId));
 
-  // Filtra pelo período selecionado
-  const cutoff=useMemo(()=>{
+  // Atalhos de período
+  function setPeriod(days){
     const d=new Date();
-    if(period==="7") d.setDate(d.getDate()-7);
-    else if(period==="30") d.setDate(d.getDate()-30);
-    else{d.setDate(1);} // mês atual
-    return d.toISOString().split("T")[0];
-  },[period]);
+    if(days==="mes"){d.setDate(1);}
+    else d.setDate(d.getDate()-days);
+    setDf(d.toISOString().split("T")[0]);
+    setDt(today());
+  }
 
-  const pData=useMemo(()=>portioning.filter(p=>p.date>=cutoff),[portioning,cutoff]);
-  const filt=useMemo(()=>portioning.filter(p=>p.itemName.toLowerCase().includes(q.toLowerCase())).sort((a,b)=>b.id-a.id),[portioning,q]);
+  // Dados filtrados pelo período do dashboard
+  const pData=useMemo(()=>portioning.filter(p=>p.date>=df&&p.date<=dt),[portioning,df,dt]);
+  // Dados filtrados pela busca textual (tabela)
+  const filt=useMemo(()=>pData.filter(p=>p.itemName.toLowerCase().includes(q.toLowerCase())||p.employee.toLowerCase().includes(q.toLowerCase())).sort((a,b)=>b.id-a.id),[pData,q]);
 
   // KPIs
   const totalReg=pData.length;
   const totalQty=useMemo(()=>pData.reduce((s,p)=>s+p.quantity,0),[pData]);
-  const totalItens=useMemo(()=>new Set(pData.map(p=>p.itemId)).size,[pData]);
+  const topEmp=useMemo(()=>{
+    const m={};pData.forEach(p=>{m[p.employee]=(m[p.employee]||0)+1;});
+    const s=Object.entries(m).sort((a,b)=>b[1]-a[1]);
+    return s.length>0?s[0][0]:"—";
+  },[pData]);
 
-  // Gráfico por dia
+  // Gráfico por dia — gera todos os dias entre df e dt
   const byDay=useMemo(()=>{
-    const days=Number(period==="mes"?30:period);
     const map={};
-    for(let i=days-1;i>=0;i--){
-      const d=new Date();d.setDate(d.getDate()-i);
+    const start=new Date(df),end=new Date(dt);
+    for(let d=new Date(start);d<=end;d.setDate(d.getDate()+1)){
       const k=d.toISOString().split("T")[0];
       map[k]={label:d.getDate()+"/"+(d.getMonth()+1),value:0};
     }
     pData.forEach(p=>{if(map[p.date]) map[p.date].value+=p.quantity;});
     return Object.values(map);
-  },[pData,period]);
-
-  // Ranking itens
-  const rankItems=useMemo(()=>{
-    const m={};
-    pData.forEach(p=>{m[p.itemName]=(m[p.itemName]||0)+p.quantity;});
-    return Object.entries(m).map(([label,value])=>({label,value})).sort((a,b)=>b.value-a.value).slice(0,8);
-  },[pData]);
+  },[pData,df,dt]);
 
   // Ranking funcionários
   const rankEmps=useMemo(()=>{
-    const m={};
-    pData.forEach(p=>{m[p.employee]=(m[p.employee]||0)+p.quantity;});
+    const m={};pData.forEach(p=>{m[p.employee]=(m[p.employee]||0)+p.quantity;});
     return Object.entries(m).map(([label,value])=>({label,value})).sort((a,b)=>b.value-a.value);
-  },[pData]);
-
-  // Funcionário mais ativo (por registros)
-  const topEmp=useMemo(()=>{
-    const m={};
-    pData.forEach(p=>{m[p.employee]=(m[p.employee]||0)+1;});
-    const sorted=Object.entries(m).sort((a,b)=>b[1]-a[1]);
-    return sorted.length>0?sorted[0][0]:"—";
   },[pData]);
 
   function openEdit(row){
@@ -1350,104 +1323,92 @@ function PortTab({items,employees,portioning,setPortioning,showToast}){
     setDm(false);setTd(null);
   }
 
-  const periodLabel={"7":"7 dias","30":"30 dias","mes":"Mês atual"}[period];
-
   return (
     <div style={{display:"flex",flexDirection:"column",gap:20}}>
-      {/* Barra de controle */}
-      <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"center",justifyContent:"space-between"}}>
-        <div style={{display:"flex",gap:4}}>
-          {[["dash","Dashboard",<Ic.Home size={14}/>],["list","Registros",<Ic.Doc size={14}/>]].map(([v,l,ic])=>(
-            <button key={v} onClick={()=>setView(v)} style={{display:"flex",alignItems:"center",gap:6,padding:"9px 16px",borderRadius:10,border:view===v?"2px solid "+C.accent:"1.5px solid "+C.border,background:view===v?C.accentLight:C.card,cursor:"pointer",fontSize:13,fontWeight:view===v?700:500,color:view===v?C.accent:C.textSec,fontFamily:font}}>
-              {ic}{l}
-            </button>
-          ))}
-        </div>
-        <div style={{display:"flex",gap:8,alignItems:"center"}}>
-          {view==="dash"&&(
+
+      {/* ── Filtro de data ── */}
+      <Card style={{padding:"14px 20px"}}>
+        <div style={{display:"flex",gap:12,alignItems:"center",flexWrap:"wrap",justifyContent:"space-between"}}>
+          <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+            <span style={{fontSize:13,fontWeight:600,color:C.textSec,fontFamily:font}}>Período:</span>
+            <input type="date" value={df} onChange={e=>setDf(e.target.value)} style={{...iS,width:140,padding:"8px 12px"}}/>
+            <span style={{fontSize:13,color:C.textMuted}}>até</span>
+            <input type="date" value={dt} onChange={e=>setDt(e.target.value)} style={{...iS,width:140,padding:"8px 12px"}}/>
             <div style={{display:"flex",gap:4}}>
-              {[["7","7 dias"],["30","30 dias"],["mes","Mês atual"]].map(([v,l])=>(
-                <button key={v} onClick={()=>setPeriod(v)} style={{padding:"7px 12px",borderRadius:8,border:period===v?"2px solid "+C.accent:"1.5px solid "+C.border,background:period===v?C.accentLight:C.card,cursor:"pointer",fontSize:12,fontWeight:period===v?700:400,color:period===v?C.accent:C.textMuted,fontFamily:font}}>
+              {[["7 dias",7],["30 dias",30],["Mês atual","mes"]].map(([l,v])=>(
+                <button key={v} onClick={()=>setPeriod(v)}
+                  style={{padding:"6px 10px",borderRadius:7,border:"1.5px solid "+C.border,background:C.bg,cursor:"pointer",fontSize:11,fontWeight:500,color:C.textMuted,fontFamily:font,whiteSpace:"nowrap"}}>
                   {l}
                 </button>
               ))}
             </div>
-          )}
-          {view==="list"&&<SBar value={q} onChange={setQ} placeholder="Buscar..."/>}
-          <Btn onClick={()=>{setEd(null);setF({...ef,date:today(),time:nowT()});setMod(true);}} icon={<Ic.Cut size={16}/>}>Novo Porcionamento</Btn>
+          </div>
+          <div style={{display:"flex",gap:8,alignItems:"center"}}>
+            <SBar value={q} onChange={setQ} placeholder="Buscar por item ou responsável..."/>
+            <Btn onClick={()=>{setEd(null);setF({...ef,date:today(),time:nowT()});setMod(true);}} icon={<Ic.Cut size={16}/>}>Novo Porcionamento</Btn>
+          </div>
         </div>
+      </Card>
+
+      {/* ── KPIs ── */}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:16}}>
+        <KPI icon={<Ic.Cut size={20} color={C.accent}/>} label="Registros" value={fmtN(totalReg)} sub={fmtDate(df)+" → "+fmtDate(dt)} bgColor={C.accentLight}/>
+        <KPI icon={<Ic.Box size={20} color={C.secondary}/>} label="Total Porcionado" value={fmtN(totalQty)} sub="unidades no período" bgColor={C.secondaryLight}/>
+        <KPI icon={<Ic.Users size={20} color={C.accent}/>} label="Mais Ativo" value={topEmp==="—"?"—":topEmp.split(" ")[0]} sub={topEmp!=="—"?topEmp:"Nenhum registro"} bgColor={C.accentLight}/>
       </div>
 
-      {/* DASHBOARD VIEW */}
-      {view==="dash"&&(
-        <div style={{display:"flex",flexDirection:"column",gap:20}}>
-          {/* KPIs */}
-          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:16}}>
-            <KPI icon={<Ic.Cut size={20} color={C.accent}/>} label="Registros" value={fmtN(totalReg)} sub={periodLabel} bgColor={C.accentLight}/>
-            <KPI icon={<Ic.Box size={20} color={C.secondary}/>} label="Total Porcionado" value={fmtN(totalQty)} sub="unidades" bgColor={C.secondaryLight}/>
-            <KPI icon={<Ic.Users size={20} color={C.accent}/>} label="Mais Ativo" value={topEmp==="—"?"—":topEmp.split(" ")[0]} sub={topEmp!=="—"?topEmp:""} bgColor={C.accentLight}/>
-          </div>
-
-          {/* Gráfico por dia */}
-          <Card style={{padding:20}}>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
-              <h3 style={{fontSize:15,fontWeight:700,fontFamily:fontD,margin:0}}>Porcionamento por dia</h3>
-              <span style={{fontSize:12,color:C.textMuted}}>{periodLabel}</span>
-            </div>
-            {pData.length===0
-              ?<div style={{height:180,display:"flex",alignItems:"center",justifyContent:"center",color:C.textMuted,fontSize:13}}>Nenhum registro no período</div>
-              :<BarChart data={byDay} color={C.accent} height={200}/>
-            }
-          </Card>
-
-          {/* Ranking itens + Ranking funcionários */}
-          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(300px,1fr))",gap:16}}>
-            <Card style={{padding:20}}>
-              <h3 style={{fontSize:15,fontWeight:700,fontFamily:fontD,marginBottom:16}}>👤 Por funcionário</h3>
-              {rankEmps.length===0
-                ?<div style={{color:C.textMuted,fontSize:13,textAlign:"center",padding:20}}>Nenhum registro</div>
-                :<div style={{display:"flex",flexDirection:"column",gap:10}}>
-                  {rankEmps.map((d,i)=>{
-                    const maxV=rankEmps[0].value;
-                    const colors=[C.accent,C.secondary,C.primary,"#7B5EA7","#2B7A9B"];
-                    const col=colors[i%colors.length];
-                    return(
-                      <div key={i} style={{display:"flex",alignItems:"center",gap:10}}>
-                        <div style={{width:30,height:30,borderRadius:15,background:col+"22",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
-                          <span style={{fontSize:11,fontWeight:800,color:col}}>{d.label.charAt(0)}</span>
-                        </div>
-                        <div style={{flex:1,minWidth:0}}>
-                          <div style={{fontSize:13,fontWeight:600,color:C.text,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{d.label}</div>
-                          <div style={{background:C.border,borderRadius:4,height:6,marginTop:4,overflow:"hidden"}}>
-                            <div style={{width:(d.value/maxV*100)+"%",background:col,height:"100%",borderRadius:4}}/>
-                          </div>
-                        </div>
-                        <span style={{fontSize:13,fontWeight:700,color:col,flexShrink:0,minWidth:36,textAlign:"right"}}>{fmtN(d.value)}</span>
-                      </div>
-                    );
-                  })}
-                </div>
-              }
-            </Card>
-          </div>
-        </div>
-      )}
-
-      {/* LIST VIEW */}
-      {view==="list"&&(
-        <Card>
-          <DT columns={[
-            {key:"date",label:"Data",render:(v,r)=>fmtDate(v)+" "+r.time,nowrap:true},
-            {key:"itemName",label:"Item",render:v=><span style={{fontWeight:600}}>{v}</span>},
-            {key:"quantity",label:"Quantidade",render:v=><Badge color={C.accent} bg={C.accentLight}>{v}</Badge>},
-            {key:"employee",label:"Responsável"},
-          ]} data={filt} onEdit={openEdit} onDelete={r=>{setTd(r);setDm(true);}}
-            onBulkDelete={ids=>{
-              setPortioning(portioning.filter(p=>!ids.includes(p.id)));
-              showToast(ids.length+" porcionamento(s) excluído(s)","warning");
-            }}/>
+      {/* ── Gráfico + Ranking lado a lado ── */}
+      <div style={{display:"grid",gridTemplateColumns:"2fr 1fr",gap:16}}>
+        <Card style={{padding:20}}>
+          <h3 style={{fontSize:15,fontWeight:700,fontFamily:fontD,marginBottom:16,margin:"0 0 16px"}}>Porcionamento por dia</h3>
+          <BarChart data={byDay} color={C.accent} height={200}/>
         </Card>
-      )}
+        <Card style={{padding:20}}>
+          <h3 style={{fontSize:15,fontWeight:700,fontFamily:fontD,margin:"0 0 16px"}}>👤 Por funcionário</h3>
+          {rankEmps.length===0
+            ?<div style={{color:C.textMuted,fontSize:13,textAlign:"center",padding:"30px 0"}}>Nenhum registro</div>
+            :<div style={{display:"flex",flexDirection:"column",gap:10}}>
+              {rankEmps.map((d,i)=>{
+                const maxV=rankEmps[0].value;
+                const colors=[C.accent,C.secondary,C.primary,"#7B5EA7","#2B7A9B"];
+                const col=colors[i%colors.length];
+                return(
+                  <div key={i} style={{display:"flex",alignItems:"center",gap:10}}>
+                    <div style={{width:28,height:28,borderRadius:14,background:col+"22",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+                      <span style={{fontSize:11,fontWeight:800,color:col}}>{d.label.charAt(0)}</span>
+                    </div>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{fontSize:12,fontWeight:600,color:C.text,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{d.label}</div>
+                      <div style={{background:C.border,borderRadius:4,height:5,marginTop:3,overflow:"hidden"}}>
+                        <div style={{width:(d.value/maxV*100)+"%",background:col,height:"100%",borderRadius:4}}/>
+                      </div>
+                    </div>
+                    <span style={{fontSize:12,fontWeight:700,color:col,flexShrink:0,minWidth:30,textAlign:"right"}}>{fmtN(d.value)}</span>
+                  </div>
+                );
+              })}
+            </div>
+          }
+        </Card>
+      </div>
+
+      {/* ── Tabela de registros ── */}
+      <Card>
+        <div style={{padding:"14px 20px",borderBottom:"1px solid "+C.border,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+          <h3 style={{fontSize:15,fontWeight:700,fontFamily:fontD,margin:0}}>Registros</h3>
+          <span style={{fontSize:12,color:C.textMuted}}>{fmtN(filt.length)} registro{filt.length!==1?"s":""}</span>
+        </div>
+        <DT columns={[
+          {key:"date",label:"Data",render:(v,r)=>fmtDate(v)+" "+r.time,nowrap:true},
+          {key:"itemName",label:"Item",render:v=><span style={{fontWeight:600}}>{v}</span>},
+          {key:"quantity",label:"Quantidade",render:v=><Badge color={C.accent} bg={C.accentLight}>{v}</Badge>},
+          {key:"employee",label:"Responsável"},
+        ]} data={filt} onEdit={openEdit} onDelete={r=>{setTd(r);setDm(true);}}
+          onBulkDelete={ids=>{
+            setPortioning(portioning.filter(p=>!ids.includes(p.id)));
+            showToast(ids.length+" porcionamento(s) excluído(s)","warning");
+          }}/>
+      </Card>
 
       {/* Modal criar/editar */}
       <Modal open={mod} onClose={()=>!sav&&(setMod(false),setEd(null))} title={ed?"Editar Porcionamento":"Novo Porcionamento"}>
