@@ -694,7 +694,7 @@ function Dash({items,movements,criticalItems,totalValue,monthIn,monthOut,portion
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit, minmax(200px, 1fr))",gap:16}}>
         <KPI icon={<Ic.Box size={20} color={C.primary}/>} label="Total de Itens" value={fmtN(items.length)} sub={fmtN(items.reduce((s,i)=>s+i.currentStock,0))+" unidades"} bgColor={C.primaryLight}/>
         <KPI icon={<Ic.Warn size={20} color={C.warning}/>} label="Itens Críticos" value={criticalItems.length} sub={criticalItems.length>0?"Precisa repor!":"Tudo OK"} bgColor={C.warningLight}/>
-        <KPI icon={<Ic.Store size={20} color={C.secondary}/>} label="Valor em Estoque" value={fmt(totalValue)} bgColor={C.secondaryLight}/>
+        <KPI icon={<Ic.Box size={20} color={C.secondary}/>} label="Valor em Estoque" value={fmt(totalValue)} bgColor={C.secondaryLight}/>
         <KPI icon={<Ic.Cut size={20} color={C.accent}/>} label="Porcionamento" value={fmtN(wp)} sub="Últimos 7 dias" bgColor={C.accentLight}/>
       </div>
       <Card style={{padding:20}}>
@@ -1098,59 +1098,45 @@ function OutTab({items,setItems,employees,movements,setMovements,showToast}){
 }
 
 // ===== DESPERDÍCIO =====
-function WasteTab({items,setItems,employees,wastes,setWastes,showToast}){
+function WasteTab({employees,wastes,setWastes,showToast}){
   const [q,setQ]=useState("");
   const [mod,setMod]=useState(false);
   const [dm,setDm]=useState(false);
   const [td,setTd]=useState(null);
   const [ed,setEd]=useState(null);
   const [sav,setSav]=useState(false);
-  const ef={itemId:"",quantity:"",wasteReason:"",employee:"",date:today(),time:nowT()};
+  const ef={entrada:"",employee:"",date:today(),time:nowT(),obs:""};
   const [f,setF]=useState(ef);
   const df0=()=>{const d=new Date();d.setDate(d.getDate()-30);return d.toISOString().split("T")[0];};
   const [df,setDf]=useState(df0);
   const [dt,setDt]=useState(today());
-  const sel=items.find(i=>i.id===Number(f.itemId));
-  const filt=useMemo(()=>wastes.filter(w=>w.date>=df&&w.date<=dt&&(w.itemName.toLowerCase().includes(q.toLowerCase())||w.employee.toLowerCase().includes(q.toLowerCase()))).sort((a,b)=>b.id-a.id),[wastes,q,df,dt]);
-  const tv=useMemo(()=>filt.reduce((s,w)=>{const it=items.find(i=>i.id===w.itemId);return s+(it?w.quantity*it.cost:0);},0),[filt,items]);
+  const filt=useMemo(()=>wastes.filter(w=>w.date>=df&&w.date<=dt&&(
+    w.entrada.toLowerCase().includes(q.toLowerCase())||
+    w.employee.toLowerCase().includes(q.toLowerCase())||
+    (w.obs||"").toLowerCase().includes(q.toLowerCase())
+  )).sort((a,b)=>b.id-a.id),[wastes,q,df,dt]);
 
   function openEdit(row){
     setEd(row);
-    setF({itemId:String(row.itemId),quantity:String(row.quantity),wasteReason:row.wasteReason||"",employee:row.employee,date:row.date,time:row.time});
+    setF({entrada:row.entrada,employee:row.employee,date:row.date,time:row.time,obs:row.obs||""});
     setMod(true);
   }
 
   async function save(){
-    if(!f.itemId||!f.quantity||!f.wasteReason||!f.employee){showToast("Preencha todos os campos","error");return;}
-    const qty=Number(f.quantity);
-    if(isNaN(qty)||qty<=0){showToast("Quantidade inválida","error");return;}
+    if(!f.entrada.trim()||!f.employee){showToast("Preencha os campos obrigatórios","error");return;}
     if(f.date>today()){showToast("Data não pode ser futura","error");return;}
     setSav(true);await new Promise(r=>setTimeout(r,300));
     if(ed){
-      const itemMudou=ed.itemId!==Number(f.itemId);
-      setWastes(prev=>prev.map(w=>w.id===ed.id?{...w,itemId:Number(f.itemId),itemName:sel.name,quantity:qty,wasteReason:f.wasteReason,employee:f.employee,date:f.date,time:f.time}:w));
-      if(itemMudou){
-        setItems(prev=>prev.map(i=>{
-          if(i.id===ed.itemId) return {...i,currentStock:i.currentStock+ed.quantity};
-          if(i.id===Number(f.itemId)) return {...i,currentStock:Math.max(0,i.currentStock-qty)};
-          return i;
-        }));
-      } else {
-        const diff=ed.quantity-qty;
-        setItems(prev=>prev.map(i=>i.id===Number(f.itemId)?{...i,currentStock:Math.max(0,i.currentStock+diff)}:i));
-      }
+      setWastes(prev=>prev.map(w=>w.id===ed.id?{...w,entrada:f.entrada.trim(),employee:f.employee,date:f.date,time:f.time,obs:f.obs.trim()}:w));
       showToast("Desperdício atualizado!");
     } else {
-      if(qty>sel.currentStock){showToast("Estoque insuficiente! Disponível: "+sel.currentStock+" "+sel.unit,"error");setSav(false);return;}
-      setWastes(prev=>[...prev,{id:nid(prev),itemId:Number(f.itemId),itemName:sel.name,quantity:qty,wasteReason:f.wasteReason,employee:f.employee,date:f.date,time:f.time}]);
-      setItems(prev=>prev.map(i=>i.id===Number(f.itemId)?{...i,currentStock:i.currentStock-qty}:i));
-      showToast("Desperdício de "+qty+" "+sel.unit+" registrado!");
+      setWastes(prev=>[...prev,{id:nid(prev),entrada:f.entrada.trim(),employee:f.employee,date:f.date,time:f.time,obs:f.obs.trim()}]);
+      showToast("Desperdício registrado!");
     }
     setSav(false);setMod(false);setEd(null);setF({...ef,date:today(),time:nowT()});
   }
 
   function doDelete(){
-    setItems(prev=>prev.map(i=>i.id===td.itemId?{...i,currentStock:i.currentStock+td.quantity}:i));
     setWastes(prev=>prev.filter(w=>w.id!==td.id));
     showToast("Desperdício excluído","warning");
     setDm(false);setTd(null);
@@ -1158,7 +1144,7 @@ function WasteTab({items,setItems,employees,wastes,setWastes,showToast}){
 
   function dl(){
     if(!filt.length||typeof window.XLSX==="undefined") return;
-    const d=filt.map(w=>{const it=items.find(i=>i.id===w.itemId);return{Data:fmtDate(w.date),Hora:w.time,Item:w.itemName,Qtd:w.quantity,Causa:w.wasteReason||"—",Valor:it?(w.quantity*it.cost).toFixed(2):"—",Resp:w.employee};});
+    const d=filt.map(w=>({Data:fmtDate(w.date),Hora:w.time,Entrada:w.entrada,Responsável:w.employee,Obs:w.obs||""}));
     const ws=window.XLSX.utils.json_to_sheet(d);const wb=window.XLSX.utils.book_new();window.XLSX.utils.book_append_sheet(wb,ws,"Desperdício");window.XLSX.writeFile(wb,"desperdicio.xlsx");
   }
 
@@ -1171,60 +1157,58 @@ function WasteTab({items,setItems,employees,wastes,setWastes,showToast}){
         <Btn onClick={dl} variant="secondary" icon={<Ic.Dl size={16}/>}>Exportar</Btn>
         <Btn onClick={()=>{setEd(null);setF({...ef,date:today(),time:nowT()});setMod(true);}} variant="danger" icon={<Ic.Warn size={16}/>}>Registrar Perda</Btn>
       </div>
-      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit, minmax(200px, 1fr))",gap:16}}>
-        <KPI icon={<Ic.Warn size={20} color={C.danger}/>} label="Perdas no Período" value={filt.length} bgColor={C.dangerLight}/>
-        <KPI icon={<Ic.Store size={20} color={C.warning}/>} label="Valor Perdido" value={fmt(tv)} bgColor={C.warningLight}/>
-      </div>
+      <KPI icon={<Ic.Warn size={20} color={C.danger}/>} label="Perdas no Período" value={filt.length} bgColor={C.dangerLight}/>
       <Card>
         <DT columns={[
           {key:"date",label:"Data",render:(v,r)=>fmtDate(v)+" "+r.time,nowrap:true},
-          {key:"itemName",label:"Item",render:v=><span style={{fontWeight:600}}>{v}</span>},
-          {key:"quantity",label:"Qtd",render:v=><Badge color={C.danger} bg={C.dangerLight}>{v}</Badge>},
-          {key:"wasteReason",label:"Causa",render:v=>v||"—"},
+          {key:"entrada",label:"Entrada",render:v=><span style={{fontWeight:600}}>{v}</span>},
           {key:"employee",label:"Responsável"},
+          {key:"obs",label:"Obs",render:v=>v||"—"},
         ]} data={filt}
           onEdit={openEdit}
           onDelete={r=>{setTd(r);setDm(true);}}
           onBulkDelete={ids=>{
-            const removidos=wastes.filter(w=>ids.includes(w.id));
-            let novosItems=[...items];
-            removidos.forEach(w=>{novosItems=novosItems.map(i=>i.id===w.itemId?{...i,currentStock:i.currentStock+w.quantity}:i);});
             setWastes(wastes.filter(w=>!ids.includes(w.id)));
-            setItems(novosItems);
-            showToast(ids.length+" desperdício(s) excluído(s)","warning");
+            showToast(ids.length+" registro(s) excluído(s)","warning");
           }}/>
       </Card>
 
       {/* Modal criar/editar */}
       <Modal open={mod} onClose={()=>!sav&&(setMod(false),setEd(null))} title={ed?"Editar Desperdício":"Registrar Perda/Desperdício"}>
-        <Sel label="Item" required options={items.map(i=>({value:String(i.id),label:i.name+" ("+i.currentStock+" disponível)"}))} value={f.itemId} onChange={e=>setF({...f,itemId:e.target.value})}/>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16}}>
-          <Inp label="Quantidade" required type="number" min="1" value={f.quantity} onChange={e=>setF({...f,quantity:e.target.value})}/>
-          <Sel label="Causa" required options={WASTE_R} value={f.wasteReason} onChange={e=>setF({...f,wasteReason:e.target.value})}/>
-        </div>
+        <FF label="Entrada" required>
+          <textarea value={f.entrada} onChange={e=>setF({...f,entrada:e.target.value})}
+            placeholder="Descreva o que foi desperdiçado..."
+            rows={3}
+            style={{...iS,resize:"vertical",minHeight:80}}
+            onFocus={e=>{e.target.style.borderColor=C.primary;e.target.style.boxShadow="0 0 0 3px "+C.primaryLight;}}
+            onBlur={e=>{e.target.style.borderColor=C.border;e.target.style.boxShadow="none";}}/>
+        </FF>
         <Sel label="Responsável" required options={employees.filter(e=>e.status==="Ativo").map(e=>e.name)} value={f.employee} onChange={e=>setF({...f,employee:e.target.value})}/>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16}}>
           <Inp label="Data" required type="date" value={f.date} onChange={e=>setF({...f,date:e.target.value})}/>
           <Inp label="Hora" type="time" value={f.time} onChange={e=>setF({...f,time:e.target.value})}/>
         </div>
-        {sel&&(
-          <div style={{background:sel.currentStock<=sel.minStock?C.warningLight:C.bg,borderRadius:10,padding:12,fontSize:13,color:C.textSec,display:"flex",alignItems:"center",gap:8}}>
-            <Ic.Info size={16} color={C.textMuted}/>
-            <span>Estoque: <strong style={{color:sel.currentStock<=sel.minStock?C.danger:C.success}}>{sel.currentStock} {sel.unit}</strong> (mín: {sel.minStock})</span>
-          </div>
-        )}
-        <div style={{display:"flex",gap:12,justifyContent:"flex-end",marginTop:20}}>
+        <FF label="Observações">
+          <textarea value={f.obs} onChange={e=>setF({...f,obs:e.target.value})}
+            placeholder="Observações adicionais (opcional)..."
+            rows={2}
+            style={{...iS,resize:"vertical",minHeight:60}}
+            onFocus={e=>{e.target.style.borderColor=C.primary;e.target.style.boxShadow="0 0 0 3px "+C.primaryLight;}}
+            onBlur={e=>{e.target.style.borderColor=C.border;e.target.style.boxShadow="none";}}/>
+        </FF>
+        <div style={{display:"flex",gap:12,justifyContent:"flex-end",marginTop:8}}>
           <Btn variant="ghost" onClick={()=>{setMod(false);setEd(null);}} disabled={sav}>Cancelar</Btn>
           <Btn variant="danger" onClick={save} icon={<Ic.Check size={16}/>} loading={sav}>{sav?"Salvando...":(ed?"Salvar":"Confirmar")}</Btn>
         </div>
       </Modal>
 
       {/* Modal excluir */}
-      <Modal open={dm} onClose={()=>setDm(false)} title="Excluir Desperdício" width={420}>
-        <p style={{fontSize:14,color:C.textSec,marginBottom:12}}>Tem certeza? A quantidade será devolvida ao estoque.</p>
+      <Modal open={dm} onClose={()=>setDm(false)} title="Excluir Registro" width={420}>
+        <p style={{fontSize:14,color:C.textSec,marginBottom:12}}>Tem certeza que deseja excluir este registro?</p>
         {td&&<div style={{background:C.dangerLight,padding:14,borderRadius:8,border:"1px solid "+C.danger,marginBottom:20}}>
-          <div style={{fontSize:15,fontWeight:700}}>{td.itemName}</div>
-          <div style={{fontSize:12,color:C.textSec,marginTop:4}}>{fmtDate(td.date)} · {td.quantity} unidades · {td.wasteReason}</div>
+          <div style={{fontSize:14,fontWeight:700,color:C.text}}>{td.entrada}</div>
+          <div style={{fontSize:12,color:C.textSec,marginTop:4}}>{fmtDate(td.date)} {td.time} · {td.employee}</div>
+          {td.obs&&<div style={{fontSize:12,color:C.textSec,marginTop:4,fontStyle:"italic"}}>{td.obs}</div>}
         </div>}
         <div style={{display:"flex",gap:12,justifyContent:"flex-end"}}>
           <Btn variant="ghost" onClick={()=>setDm(false)}>Cancelar</Btn>
@@ -1236,7 +1220,7 @@ function WasteTab({items,setItems,employees,wastes,setWastes,showToast}){
 }
 
 // ===== PORCIONAMENTO =====
-function PortTab({items,setItems,employees,portioning,setPortioning,showToast}){
+function PortTab({items,employees,portioning,setPortioning,showToast}){
   const [q,setQ]=useState("");
   const [mod,setMod]=useState(false);
   const [dm,setDm]=useState(false);
@@ -1261,32 +1245,16 @@ function PortTab({items,setItems,employees,portioning,setPortioning,showToast}){
     if(f.date>today()){showToast("Data não pode ser futura","error");return;}
     setSav(true);await new Promise(r=>setTimeout(r,300));
     if(ed){
-      const itemMudou=ed.itemId!==Number(f.itemId);
       setPortioning(prev=>prev.map(p=>p.id===ed.id?{...p,itemId:Number(f.itemId),itemName:sel.name,quantity:qty,date:f.date,time:f.time,employee:f.employee}:p));
-      if(itemMudou){
-        // Devolve estoque ao item antigo e consome do novo
-        setItems(prev=>prev.map(i=>{
-          if(i.id===ed.itemId) return {...i,currentStock:i.currentStock+ed.quantity};
-          if(i.id===Number(f.itemId)) return {...i,currentStock:Math.max(0,i.currentStock-qty)};
-          return i;
-        }));
-      } else {
-        const diff=ed.quantity-qty; // positivo = devolve estoque, negativo = consome mais
-        setItems(prev=>prev.map(i=>i.id===Number(f.itemId)?{...i,currentStock:Math.max(0,i.currentStock+diff)}:i));
-      }
       showToast("Porcionamento atualizado!");
     } else {
-      if(qty>sel.currentStock){showToast("Estoque insuficiente! Disponível: "+sel.currentStock+" "+sel.unit,"error");setSav(false);return;}
-      setPortioning(prev=>[...prev,{id:nid(portioning),itemId:Number(f.itemId),itemName:sel.name,quantity:qty,date:f.date,time:f.time,employee:f.employee}]);
-      setItems(prev=>prev.map(i=>i.id===Number(f.itemId)?{...i,currentStock:i.currentStock-qty}:i));
+      setPortioning(prev=>[...prev,{id:nid(prev),itemId:Number(f.itemId),itemName:sel.name,quantity:qty,date:f.date,time:f.time,employee:f.employee}]);
       showToast("Porcionamento registrado!");
     }
     setSav(false);setMod(false);setEd(null);setF({...ef,date:today(),time:nowT()});
   }
 
   function doDelete(){
-    // Devolve a quantidade ao estoque ao excluir
-    setItems(prev=>prev.map(i=>i.id===td.itemId?{...i,currentStock:i.currentStock+td.quantity}:i));
     setPortioning(prev=>prev.filter(p=>p.id!==td.id));
     showToast("Porcionamento excluído","warning");
     setDm(false);setTd(null);
@@ -1306,19 +1274,14 @@ function PortTab({items,setItems,employees,portioning,setPortioning,showToast}){
           {key:"employee",label:"Responsável"},
         ]} data={filt} onEdit={openEdit} onDelete={r=>{setTd(r);setDm(true);}}
           onBulkDelete={ids=>{
-            const removidos=portioning.filter(p=>ids.includes(p.id));
-            // Devolve estoque de cada porcionamento removido
-            let novosItems=[...items];
-            removidos.forEach(p=>{novosItems=novosItems.map(i=>i.id===p.itemId?{...i,currentStock:i.currentStock+p.quantity}:i);});
-            const novosPort=portioning.filter(p=>!ids.includes(p.id));
-            setPortioning(novosPort);setItems(novosItems);
+            setPortioning(portioning.filter(p=>!ids.includes(p.id)));
             showToast(ids.length+" porcionamento(s) excluído(s)","warning");
           }}/>
       </Card>
 
       {/* Modal criar/editar */}
       <Modal open={mod} onClose={()=>!sav&&(setMod(false),setEd(null))} title={ed?"Editar Porcionamento":"Novo Porcionamento"}>
-        <Sel label="Item" required options={items.map(i=>({value:String(i.id),label:i.name+" ("+i.currentStock+" disponível)"}))} value={f.itemId} onChange={e=>setF({...f,itemId:e.target.value})}/>
+        <Sel label="Item" required options={items.map(i=>({value:String(i.id),label:i.name+" ("+i.unit+")"}))} value={f.itemId} onChange={e=>setF({...f,itemId:e.target.value})}/>
         <Inp label="Quantidade" required type="number" min="1" value={f.quantity} onChange={e=>setF({...f,quantity:e.target.value})}/>
         <Sel label="Responsável" required options={employees.filter(e=>e.status==="Ativo").map(e=>e.name)} value={f.employee} onChange={e=>setF({...f,employee:e.target.value})}/>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16}}>
