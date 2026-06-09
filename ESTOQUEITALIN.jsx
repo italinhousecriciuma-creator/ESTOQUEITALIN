@@ -1,3 +1,15 @@
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import {
+  Package, TrendingUp, TrendingDown, AlertTriangle, Search, Plus, Edit, Trash2,
+  Calendar, X, Check, FileText, Users, ArrowUpCircle, ArrowDownCircle, Home,
+  Bell, Warehouse, AlertCircle, CheckCircle, Info, RefreshCw, Menu, Download,
+  Upload, Settings, Scissors, BarChart3, Database, Cloud, CloudOff, HardDrive,
+  ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ArrowUpDown, ArrowUp, ArrowDown
+} from "lucide-react";
+import {
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+  PieChart as RePieChart, Pie, Cell, Legend, Area, AreaChart, LineChart, Line
+} from "recharts";
 
 /* ═══════════════════════════════════════════
    SISTEMA DE BANCO DE DADOS (PERSISTÊNCIA)
@@ -10,26 +22,23 @@ const DB_KEYS = {
   categories: 'italin-house:categories',
   units: 'italin-house:units'
 };
-const { useState, useEffect, useMemo, useCallback, useRef } = React;
-const { AreaChart, BarChart, LineChart, PieChart, Area, Bar, Line, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } = Recharts;
-const { Home, Package, ArrowUpCircle, ArrowDownCircle, AlertTriangle, Scissors, Users, FileText, Settings, Plus, Edit, Trash2, Check, X, Search, Download, RefreshCw, Bell, Menu, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ArrowUp, ArrowDown, ArrowUpDown, Info, CheckCircle, AlertCircle, Cloud, CloudOff, HardDrive, Database, Warehouse } = lucideReact;
 
-  const db = {
+const db = {
   async save(key, data) {
     try {
-      localStorage.setItem(key, JSON.stringify(data));
-      return true;
+      const result = await window.storage.set(key, JSON.stringify(data));
+      return result !== null;
     } catch (error) {
       console.error(`❌ Erro ao salvar ${key}:`, error);
       return false;
     }
   },
-
+  
   async load(key, defaultValue = null) {
     try {
-      const result = localStorage.getItem(key);
-      if (result) {
-        return JSON.parse(result);
+      const result = await window.storage.get(key);
+      if (result && result.value) {
+        return JSON.parse(result.value);
       }
       return defaultValue;
     } catch (error) {
@@ -37,20 +46,20 @@ const { Home, Package, ArrowUpCircle, ArrowDownCircle, AlertTriangle, Scissors, 
       return defaultValue;
     }
   },
-
+  
   async delete(key) {
     try {
-      localStorage.removeItem(key);
-      return true;
+      const result = await window.storage.delete(key);
+      return result;
     } catch (error) {
       console.error(`❌ Erro ao deletar ${key}:`, error);
       return null;
     }
   },
-
+  
   async clearAll() {
     try {
-      Object.values(DB_KEYS).forEach(key => localStorage.removeItem(key));
+      await Promise.all(Object.values(DB_KEYS).map(key => window.storage.delete(key)));
       console.log('✓ Todos os dados foram limpos');
       return true;
     } catch (error) {
@@ -518,9 +527,25 @@ const nowTime = () => new Date().toTimeString().slice(0, 5);
 const nextId = arr => (arr.length > 0 ? Math.max(...arr.map(x => x.id)) + 1 : 1);
 
 /* ═══════════════════════════════════════════
+   HOOK: Largura da janela (responsivo)
+   ═══════════════════════════════════════════ */
+function useWindowWidth() {
+  const [width, setWidth] = useState(typeof window !== 'undefined' ? window.innerWidth : 1024);
+  useEffect(() => {
+    const handleResize = () => setWidth(window.innerWidth);
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+  return width;
+}
+
+/* ═══════════════════════════════════════════
    APP PRINCIPAL
    ═══════════════════════════════════════════ */
-function App() {
+export default function InventoryApp() {
+  const windowWidth = useWindowWidth();
+  const isMobile = windowWidth <= 768;
+  const isSmall = windowWidth <= 480;
   const [activeTab, setActiveTab] = useState("dashboard");
   const [items, setItems] = useState([]);
   const [employees, setEmployees] = useState([]);
@@ -529,7 +554,7 @@ function App() {
   const [categories, setCategories] = useState([]);
   const [units, setUnits] = useState([]);
   const [toast, setToast] = useState(null);
-  const [sidebarOpen, setSidebarOpen] = useState(window.innerWidth > 768);
+  const [sidebarOpen, setSidebarOpen] = useState(typeof window !== 'undefined' ? window.innerWidth > 768 : true);
   
   // Estados do banco de dados
   const [isInitialized, setIsInitialized] = useState(false);
@@ -679,17 +704,6 @@ function App() {
     document.head.appendChild(script);
   }, []);
 
-  // Responsividade da sidebar
-  useEffect(() => {
-    const handleResize = () => {
-      if (window.innerWidth <= 768) {
-        setSidebarOpen(false);
-      }
-    };
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
-  }, []);
-
   // Função para resetar banco
   const handleResetDb = useCallback(async () => {
     if (!confirm("⚠️ ATENÇÃO!\n\nIsso irá APAGAR TODOS os dados salvos.\n\nTem certeza?")) return;
@@ -831,7 +845,7 @@ function App() {
       {toast && <Toast key={toast.key} message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
 
       {/* Overlay mobile */}
-      {sidebarOpen && window.innerWidth <= 768 && (
+      {sidebarOpen && isMobile && (
         <div className="sidebar-overlay" onClick={() => setSidebarOpen(false)} />
       )}
 
@@ -844,10 +858,10 @@ function App() {
         transition: "all 0.3s ease", 
         flexShrink: 0, 
         overflow: "hidden",
-        position: window.innerWidth <= 768 ? 'fixed' : 'relative',
+        position: isMobile ? 'fixed' : 'relative',
         height: '100%',
         zIndex: 100,
-        transform: window.innerWidth <= 768 && !sidebarOpen ? 'translateX(-100%)' : 'translateX(0)'
+        transform: isMobile && !sidebarOpen ? 'translateX(-100%)' : 'translateX(0)'
       }}>
         <div style={{ padding: sidebarOpen ? "20px 16px 16px" : "20px 11px 16px", borderBottom: "1px solid rgba(255,255,255,0.08)", display: "flex", alignItems: "center", gap: 10, minHeight: 72 }}>
           <div style={{ width: 40, height: 40, borderRadius: 10, background: `linear-gradient(135deg, ${C.primary}, ${C.accent})`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, fontSize: 16, fontWeight: 800, fontFamily: fontDisplay, color: "#fff" }}>IH</div>
@@ -863,7 +877,7 @@ function App() {
           {tabs.map(t => {
             const active = activeTab === t.id;
             return (
-              <button key={t.id} onClick={() => { setActiveTab(t.id); if (window.innerWidth <= 768) setSidebarOpen(false); }} style={{
+              <button key={t.id} onClick={() => { setActiveTab(t.id); if (isMobile) setSidebarOpen(false); }} style={{
                 display: "flex", alignItems: "center", gap: 10,
                 padding: sidebarOpen ? "10px 12px" : "10px 0",
                 borderRadius: 8, border: "none", cursor: "pointer", fontFamily: font,
@@ -908,7 +922,7 @@ function App() {
           display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0, zIndex: 50, gap: 12
         }}>
           {/* Menu mobile */}
-          {window.innerWidth <= 768 && (
+          {isMobile && (
             <button onClick={() => setSidebarOpen(true)} style={{ padding: 8, border: 'none', background: 'transparent', cursor: 'pointer' }}>
               <Menu size={24} color={C.text} />
             </button>
@@ -918,7 +932,7 @@ function App() {
             <h1 style={{ fontSize: 19, fontWeight: 700, fontFamily: fontDisplay, color: C.text, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
               {tabs.find(t => t.id === activeTab)?.label}
             </h1>
-            <p style={{ fontSize: 11, color: C.textMuted, marginTop: 2, fontFamily: font, display: window.innerWidth <= 480 ? 'none' : 'block' }}>
+            <p style={{ fontSize: 11, color: C.textMuted, marginTop: 2, fontFamily: font, display: isSmall ? 'none' : 'block' }}>
               {new Date().toLocaleDateString("pt-BR", { weekday: "long", day: "numeric", month: "long" })}
             </p>
           </div>
@@ -936,7 +950,7 @@ function App() {
           </div>
         </header>
 
-        <div style={{ flex: 1, overflow: "auto", padding: window.innerWidth <= 768 ? "16px" : "20px 24px" }} key={activeTab}>
+        <div style={{ flex: 1, overflow: "auto", padding: isMobile ? "16px" : "20px 24px" }} key={activeTab}>
           <div style={{ animation: "fadeIn 0.3s ease" }}>
             {renderTab()}
           </div>
@@ -1100,6 +1114,16 @@ function ItemsTab({ items, setItems, categories, units, showToast }) {
       showToast("Custo inválido", "error");
       return;
     }
+
+    // Verifica nome duplicado (ignora o próprio item ao editar)
+    const nameExists = items.some(i => 
+      i.name.trim().toLowerCase() === form.name.trim().toLowerCase() && 
+      (!editing || i.id !== editing.id)
+    );
+    if (nameExists) {
+      showToast("Já existe um item com este nome", "error");
+      return;
+    }
     
     setSaving(true);
     
@@ -1110,8 +1134,7 @@ function ItemsTab({ items, setItems, categories, units, showToast }) {
       setItems(prev => prev.map(i => i.id === editing.id ? { ...i, ...form, minStock, cost } : i));
       showToast("✓ Item atualizado!");
     } else {
-      const newItem = { id: nextId(items), ...form, minStock, cost, currentStock: 0 };
-      setItems(prev => [...prev, newItem]);
+      setItems(prev => [...prev, { id: nextId(prev), ...form, minStock, cost, currentStock: 0 }]);
       showToast("✓ Item cadastrado!");
     }
     
@@ -1213,6 +1236,17 @@ function StockInTab({ items, setItems, employees, movements, setMovements, showT
       showToast("Preço inválido", "error");
       return;
     }
+
+    if (!selectedItem) {
+      showToast("Item selecionado não encontrado. Selecione novamente.", "error");
+      return;
+    }
+
+    // Valida data não futura
+    if (form.date > todayISO()) {
+      showToast("A data não pode ser futura", "error");
+      return;
+    }
     
     setSaving(true);
     await new Promise(r => setTimeout(r, 300));
@@ -1236,7 +1270,7 @@ function StockInTab({ items, setItems, employees, movements, setMovements, showT
       wasteReason: null
     };
     
-    setMovements(prev => [...prev, newMov]);
+    setMovements(prev => [...prev, { ...newMov, id: nextId(prev) }]);
     setItems(prev => prev.map(i => i.id === Number(form.itemId) ? { ...i, currentStock: i.currentStock + qty } : i));
     
     showToast(`✓ Entrada de ${qty} ${selectedItem.unit} registrada!`);
@@ -1355,9 +1389,19 @@ function StockOutTab({ items, setItems, employees, movements, setMovements, show
       showToast("Quantidade deve ser maior que zero", "error");
       return;
     }
+
+    if (!selectedItem) {
+      showToast("Item selecionado não encontrado. Selecione novamente.", "error");
+      return;
+    }
     
     if (qty > selectedItem.currentStock) {
       showToast(`Estoque insuficiente! Disponível: ${selectedItem.currentStock} ${selectedItem.unit}`, "error");
+      return;
+    }
+
+    if (form.date > todayISO()) {
+      showToast("A data não pode ser futura", "error");
       return;
     }
     
@@ -1383,7 +1427,7 @@ function StockOutTab({ items, setItems, employees, movements, setMovements, show
       invoice: null
     };
     
-    setMovements(prev => [...prev, newMov]);
+    setMovements(prev => [...prev, { ...newMov, id: nextId(prev) }]);
     setItems(prev => prev.map(i => i.id === Number(form.itemId) ? { ...i, currentStock: i.currentStock - qty } : i));
     
     showToast(`✓ Saída de ${qty} ${selectedItem.unit} registrada!`);
@@ -1561,6 +1605,16 @@ function PortioningTab({ items, setItems, employees, portioning, setPortioning, 
       return;
     }
 
+    if (!selectedItem) {
+      showToast("Item selecionado não encontrado. Selecione novamente.", "error");
+      return;
+    }
+
+    if (qty > selectedItem.currentStock) {
+      showToast(`Estoque insuficiente! Disponível: ${selectedItem.currentStock} ${selectedItem.unit}`, "error");
+      return;
+    }
+
     setSaving(true);
     await new Promise(r => setTimeout(r, 300));
 
@@ -1574,7 +1628,7 @@ function PortioningTab({ items, setItems, employees, portioning, setPortioning, 
       employee: form.employee 
     };
     
-    setPortioning(prev => [...prev, newPort]);
+    setPortioning(prev => [...prev, { ...newPort, id: nextId(prev) }]);
     setItems(prev => prev.map(i => i.id === Number(form.itemId) ? { ...i, currentStock: Math.max(0, i.currentStock - qty) } : i));
     
     showToast(`✓ Porcionamento de ${qty} ${selectedItem.unit} registrado!`);
