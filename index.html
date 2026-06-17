@@ -18,13 +18,14 @@ async function boot(){
   const src=document.getElementById('app').textContent;
   // Hash simples do código para invalidar cache em novos deploys
   const srcHash=src.length+'-'+src.slice(0,64).replace(/\s/g,'').slice(0,20);
-  const cacheKey='italin_babel_'+srcHash;
-  // Limpa caches de versões antigas
-  Object.keys(sessionStorage).filter(k=>k.startsWith('italin_babel_')&&k!==cacheKey).forEach(k=>sessionStorage.removeItem(k));
+  // v2: força runtime CLÁSSICO do Babel (evita "import ... from react/jsx-runtime")
+  const cacheKey='italin_babel_v2_'+srcHash;
+  // Limpa caches de versões antigas (qualquer chave italin_babel_*)
+  Object.keys(sessionStorage).filter(k=>k.startsWith('italin_babel')&&k!==cacheKey).forEach(k=>sessionStorage.removeItem(k));
   let out=sessionStorage.getItem(cacheKey);
   if(!out){
     await loadScript('https://unpkg.com/@babel/standalone/babel.min.js');
-    out=Babel.transform(src,{presets:['react']}).code;
+    out=Babel.transform(src,{presets:[['react',{runtime:'classic'}]]}).code;
     try{sessionStorage.setItem(cacheKey,out);}catch(e){}
   }
   eval(out);
