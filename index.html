@@ -123,38 +123,51 @@ function LineChart({data,height=240}){
 
 // DB
 const DB_KEYS={items:'italin:items',employees:'italin:employees',movements:'italin:movements',portioning:'italin:portioning',categories:'italin:categories',units:'italin:units',waste:'italin:waste'};
+// IMPORTANTE: save/load/clearAll NÃO engolem mais erros — eles propagam (throw),
+// para que o App saiba de verdade quando algo falhou e nunca trate uma falha
+// de rede/banco como "sem dados ainda".
 const db={
   async save(k,d){
+    let r;
     try{
-      // Atualiza cache local imediatamente
-      try{sessionStorage.setItem('cache:'+k, JSON.stringify(d));}catch(e){}
-      const r=await fetch('/api/db',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:k,value:d})});
-      return r.ok;
-    }catch(e){console.error('db.save error',e);return false;}
+      r=await fetch('/api/db',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:k,value:d})});
+    }catch(e){
+      throw new Error('Falha de rede ao salvar "'+k+'": '+e.message);
+    }
+    if(!r.ok) throw new Error('Falha ao salvar "'+k+'": HTTP '+r.status);
+    return true;
   },
-  async load(k,def){
+  // Usa sendBeacon (não cancela quando a aba fecha) como melhor esforço; fetch normal
+  // continua sendo o caminho principal enquanto a página está viva.
+  saveBeacon(k,d){
     try{
-      // Tenta cache local primeiro para resposta instantânea
-      const cached=sessionStorage.getItem('cache:'+k);
-      if(cached){
-        // Atualiza em background sem bloquear
-        fetch('/api/db?key='+encodeURIComponent(k)).then(async r=>{
-          if(r.ok){const fresh=await r.json();if(fresh!==null)try{sessionStorage.setItem('cache:'+k,JSON.stringify(fresh));}catch(e){}}
-        }).catch(()=>{});
-        return JSON.parse(cached);
+      if(navigator.sendBeacon){
+        const blob=new Blob([JSON.stringify({key:k,value:d})],{type:'application/json'});
+        return navigator.sendBeacon('/api/db',blob);
       }
-      const r=await fetch('/api/db?key='+encodeURIComponent(k));
-      if(!r.ok) return def||null;
-      const data=await r.json();
-      if(data!==null&&data!==undefined)try{sessionStorage.setItem('cache:'+k,JSON.stringify(data));}catch(e){}
-      return data!==null&&data!==undefined?data:(def||null);
-    }catch(e){console.error('db.load error',e);return def||null;}
+    }catch(e){}
+    return false;
+  },
+  async load(k){
+    let r;
+    try{
+      r=await fetch('/api/db?key='+encodeURIComponent(k));
+    }catch(e){
+      throw new Error('Falha de rede ao carregar "'+k+'": '+e.message);
+    }
+    if(!r.ok) throw new Error('Falha ao carregar "'+k+'": HTTP '+r.status);
+    const data=await r.json();
+    return data===undefined?null:data; // null é uma resposta LEGÍTIMA (chave nunca salva)
   },
   async clearAll(){
+    let r;
     try{
-      Object.values(DB_KEYS).forEach(k=>sessionStorage.removeItem('cache:'+k));
-      await fetch('/api/db',{method:'DELETE'});return true;
-    }catch(e){return false;}
+      r=await fetch('/api/db',{method:'DELETE'});
+    }catch(e){
+      throw new Error('Falha de rede ao resetar: '+e.message);
+    }
+    if(!r.ok) throw new Error('Falha ao resetar: HTTP '+r.status);
+    return true;
   }
 };
 
@@ -498,66 +511,124 @@ function App(){
   const [toast,setToast]=useState(null);
   const [sb,setSb]=useState(window.innerWidth>768);
   const [init,setInit]=useState(false);
+  const [loadErr,setLoadErr]=useState(null); // guarda a mensagem de erro de carga inicial (bloqueia o app)
   const [dbSt,setDbSt]=useState("loading");
   const [lsav,setLsav]=useState(null);
   const [resetMod,setResetMod]=useState(false);
-  const ref=useRef({});
+  const ref=useRef({}); // último snapshot CONFIRMADO como salvo no banco
+  const pend=useRef(null); // snapshot pendente (ainda não confirmado) para retry/flush
   const tmr=useRef(null);
   const showToast=useCallback((m,t="success")=>setToast({message:m,type:t,key:Date.now()}),[]);
 
-  useEffect(()=>{
-    (async()=>{
-      try{
-        const[si,se,sm,sp,sc,su,sw]=await Promise.all([db.load(DB_KEYS.items),db.load(DB_KEYS.employees),db.load(DB_KEYS.movements),db.load(DB_KEYS.portioning),db.load(DB_KEYS.categories),db.load(DB_KEYS.units),db.load(DB_KEYS.waste)]);
-        const li=si&&si.length>0?si:[];
-        const le=se&&se.length>0?se:[];
-        const lm=sm&&sm.length>0?sm:[];
-        const lp=sp&&sp.length>0?sp:[];
-        const lc=sc&&sc.length>0?sc:iCat;
-        const lu=su&&su.length>0?su:iUni;
-        const lw=sw&&sw.length>0?sw:[];
-        setItems(li);setEmps(le);setMovs(lm);setPort(lp);setWastes(lw);setCats(lc);setUnits(lu);
-        ref.current={items:li,emps:le,movs:lm,port:lp,wastes:lw,cats:lc,units:lu};
-        setDbSt("saved");setInit(true);
-      }catch(e){
-        setCats(iCat);setUnits(iUni);
-        setDbSt("error");setInit(true);
-      }
-    })();
+  const loadAll=useCallback(async()=>{
+    setLoadErr(null);
+    try{
+      const[si,se,sm,sp,sc,su,sw]=await Promise.all([db.load(DB_KEYS.items),db.load(DB_KEYS.employees),db.load(DB_KEYS.movements),db.load(DB_KEYS.portioning),db.load(DB_KEYS.categories),db.load(DB_KEYS.units),db.load(DB_KEYS.waste)]);
+      const li=si&&si.length>0?si:[];
+      const le=se&&se.length>0?se:[];
+      const lm=sm&&sm.length>0?sm:[];
+      const lp=sp&&sp.length>0?sp:[];
+      const lc=sc&&sc.length>0?sc:iCat;
+      const lu=su&&su.length>0?su:iUni;
+      const lw=sw&&sw.length>0?sw:[];
+      setItems(li);setEmps(le);setMovs(lm);setPort(lp);setWastes(lw);setCats(lc);setUnits(lu);
+      ref.current={items:li,emps:le,movs:lm,port:lp,wastes:lw,cats:lc,units:lu};
+      setDbSt("saved");setInit(true);
+    }catch(e){
+      // NÃO inicializa o app com dados vazios quando a carga falha de verdade —
+      // isso evitava que o usuário começasse "do zero" e depois sobrescrevesse
+      // dados reais no banco. Mostra tela de erro com opção de tentar de novo.
+      console.error("Falha ao carregar dados do banco:",e);
+      setDbSt("error");
+      setLoadErr(e.message||"Erro desconhecido");
+    }
+  },[]);
+
+  useEffect(()=>{ loadAll(); },[loadAll]);
+
+  // Salva (de verdade) o que estiver pendente. Reaproveitado pelo debounce normal,
+  // pelo watchdog de retry e pelo "sair da aba".
+  const flushSave=useCallback(async()=>{
+    const snap=pend.current;
+    if(!snap) return;
+    const saves=[];
+    const chk=(key,val,rk)=>{if(JSON.stringify(val)!==JSON.stringify(ref.current[rk])){saves.push({key,val,rk});}};
+    chk(DB_KEYS.items,snap.items,"items");chk(DB_KEYS.employees,snap.emps,"emps");chk(DB_KEYS.movements,snap.movs,"movs");
+    chk(DB_KEYS.portioning,snap.port,"port");chk(DB_KEYS.waste,snap.wastes,"wastes");chk(DB_KEYS.categories,snap.cats,"cats");chk(DB_KEYS.units,snap.units,"units");
+    if(saves.length===0){ pend.current=null; return; }
+    setDbSt("saving");
+    try{
+      await Promise.all(saves.map(s=>db.save(s.key,s.val)));
+      // Só atualiza ref (e limpa o pendente) APÓS save completar com sucesso de verdade
+      saves.forEach(s=>{ref.current[s.rk]=s.val;});
+      pend.current=null;
+      setDbSt("saved");setLsav(new Date().toISOString());
+    }catch(e){
+      console.error("Falha ao salvar automaticamente:",e);
+      setDbSt("error");
+      // mantém pend.current — a próxima tentativa (watchdog ou nova alteração) tenta de novo
+    }
   },[]);
 
   useEffect(()=>{
     if(!init) return;
     if(tmr.current) clearTimeout(tmr.current);
-    // Captura snapshot dos valores atuais no momento do render
-    const snap={items,emps,movs,port,wastes,cats,units};
-    tmr.current=setTimeout(async()=>{
-      const saves=[];
-      const chk=(key,val,rk)=>{if(JSON.stringify(val)!==JSON.stringify(ref.current[rk])){saves.push({key,val,rk});}};
+    pend.current={items,emps,movs,port,wastes,cats,units};
+    tmr.current=setTimeout(()=>{ flushSave(); },800);
+    return()=>{if(tmr.current) clearTimeout(tmr.current);};
+  },[items,emps,movs,port,wastes,cats,units,init,flushSave]);
+
+  // Se um salvamento falhou, continua tentando periodicamente em segundo plano
+  // em vez de desistir silenciosamente (o que fazia o indicador de status mentir).
+  useEffect(()=>{
+    if(dbSt!=="error"||!init) return;
+    const iv=setInterval(()=>{ flushSave(); },5000);
+    return()=>clearInterval(iv);
+  },[dbSt,init,flushSave]);
+
+  // Salva o que estiver pendente ao trocar de aba/minimizar (ainda dá tempo de usar fetch normal)
+  // e faz um último esforço via sendBeacon exatamente no fechamento da aba/navegador
+  // (nesse momento um fetch normal pode ser cancelado pelo navegador antes de completar).
+  useEffect(()=>{
+    function onVisibility(){
+      if(document.visibilityState==="hidden"&&tmr.current){
+        clearTimeout(tmr.current);
+        flushSave();
+      }
+    }
+    function onBeforeUnload(){
+      const snap=pend.current;
+      if(!snap) return;
+      const chk=(key,val,rk)=>{if(JSON.stringify(val)!==JSON.stringify(ref.current[rk])){db.saveBeacon(key,val);}};
       chk(DB_KEYS.items,snap.items,"items");chk(DB_KEYS.employees,snap.emps,"emps");chk(DB_KEYS.movements,snap.movs,"movs");
       chk(DB_KEYS.portioning,snap.port,"port");chk(DB_KEYS.waste,snap.wastes,"wastes");chk(DB_KEYS.categories,snap.cats,"cats");chk(DB_KEYS.units,snap.units,"units");
-      if(saves.length>0){
-        setDbSt("saving");
-        try{
-          await Promise.all(saves.map(s=>db.save(s.key,s.val)));
-          // Só atualiza ref APÓS save completar com sucesso
-          saves.forEach(s=>{ref.current[s.rk]=s.val;});
-          setDbSt("saved");setLsav(new Date().toISOString());
-        }
-        catch{setDbSt("error");}
-      }
-    },800);
-    return()=>{if(tmr.current) clearTimeout(tmr.current);};
-  },[items,emps,movs,port,wastes,cats,units,init]);
+    }
+    document.addEventListener("visibilitychange",onVisibility);
+    window.addEventListener("beforeunload",onBeforeUnload);
+    window.addEventListener("pagehide",onBeforeUnload);
+    return()=>{
+      document.removeEventListener("visibilitychange",onVisibility);
+      window.removeEventListener("beforeunload",onBeforeUnload);
+      window.removeEventListener("pagehide",onBeforeUnload);
+    };
+  },[flushSave]);
 
   const doReset=useCallback(async()=>{
-    await db.clearAll();
+    try{
+      await db.clearAll();
+    }catch(e){
+      showToast("Falha ao resetar: "+e.message,"error");
+      return;
+    }
     setItems([]);setEmps([]);setMovs([]);setPort([]);setWastes([]);setCats(iCat);setUnits(iUni);
-    ref.current={};setDbSt("saved");setLsav(new Date().toISOString());
+    ref.current={items:[],emps:[],movs:[],port:[],wastes:[],cats:iCat,units:iUni};
+    pend.current=null;
+    setDbSt("saved");setLsav(new Date().toISOString());
     setResetMod(false);
     showToast("Banco resetado!","warning");
-  },[]);
+  },[showToast]);
   const resetDb=useCallback(()=>setResetMod(true),[]);
+  const retryLoad=useCallback(()=>{ setInit(false); loadAll(); },[loadAll]);
 
   const crit=useMemo(()=>items.filter(i=>i.currentStock<=i.minStock),[items]);
   const totVal=useMemo(()=>items.reduce((s,i)=>s+i.currentStock*i.cost,0),[items]);
@@ -590,6 +661,23 @@ function App(){
       case "settings": return <SettTab {...rp}/>;
       default: return null;
     }
+  }
+
+  if(loadErr){
+    return (
+      <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",height:"100vh",fontFamily:font,background:C.bg,gap:16,padding:24,textAlign:"center"}}>
+        <div style={{width:80,height:80,borderRadius:20,background:C.dangerLight,display:"flex",alignItems:"center",justifyContent:"center"}}>
+          <Ic.Warn size={36} color={C.danger}/>
+        </div>
+        <div style={{fontSize:18,fontWeight:700,color:C.text,fontFamily:fontD}}>Não foi possível carregar os dados</div>
+        <div style={{fontSize:13,color:C.textSec,maxWidth:420}}>
+          Não conseguimos falar com o banco de dados agora. Por segurança, o sistema NÃO abre com uma tela vazia
+          (pra evitar que você recadastre tudo e acabe sobrescrevendo os dados reais depois).
+        </div>
+        <div style={{fontSize:12,color:C.textMuted,fontFamily:"monospace",background:C.bg,border:"1px solid "+C.border,borderRadius:8,padding:"8px 12px",maxWidth:420,wordBreak:"break-word"}}>{loadErr}</div>
+        <Btn onClick={retryLoad} icon={<Ic.Spin size={16}/>}>Tentar novamente</Btn>
+      </div>
+    );
   }
 
   if(!init){
@@ -771,10 +859,8 @@ function ItemsTab({items,setItems,categories,units,showToast}){
         ]} data={filt}
           onEdit={r=>{setEd(r);setF({name:r.name,unit:r.unit,category:r.category,minStock:String(r.minStock),cost:String(r.cost),supplier:r.supplier||""});setMod(true);}}
           onDelete={r=>{setTd(r);setDm(true);}}
-          onBulkDelete={async ids=>{
-            const novos=items.filter(i=>!ids.includes(i.id));
-            setItems(novos);
-            await db.save(DB_KEYS.items,novos);
+          onBulkDelete={ids=>{
+            setItems(items.filter(i=>!ids.includes(i.id)));
             showToast(ids.length+" item(ns) excluído(s)","warning");
           }}/>
       </Card>
@@ -799,10 +885,8 @@ function ItemsTab({items,setItems,categories,units,showToast}){
         {td&&<div style={{background:C.dangerLight,padding:14,borderRadius:8,border:"1px solid "+C.danger,marginBottom:20}}><div style={{fontSize:15,fontWeight:700}}>{td.name}</div><div style={{fontSize:12,color:C.textSec,marginTop:4}}>Estoque: {td.currentStock} {td.unit}</div></div>}
         <div style={{display:"flex",gap:12,justifyContent:"flex-end"}}>
           <Btn variant="ghost" onClick={()=>setDm(false)}>Cancelar</Btn>
-          <Btn variant="danger" onClick={async()=>{
-            const novos=items.filter(i=>i.id!==td.id);
-            setItems(novos);
-            await db.save(DB_KEYS.items,novos);
+          <Btn variant="danger" onClick={()=>{
+            setItems(items.filter(i=>i.id!==td.id));
             showToast(td.name+" excluído","warning");
             setDm(false);
           }} icon={<Ic.Trash size={16}/>}>Excluir</Btn>
