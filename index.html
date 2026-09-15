@@ -52,6 +52,7 @@ const Ic={
   Check:({size=18,color="currentColor"})=><svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>,
   Close:({size=18,color="currentColor"})=><svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>,
   Search:({size=18,color="currentColor"})=><svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>,
+  Barcode:({size=18,color="currentColor"})=><svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeLinecap="round"><line x1="3" y1="4" x2="3" y2="20" strokeWidth="2"/><line x1="7" y1="4" x2="7" y2="20" strokeWidth="2"/><line x1="10.5" y1="4" x2="10.5" y2="20" strokeWidth="3.5"/><line x1="14" y1="4" x2="14" y2="20" strokeWidth="2"/><line x1="17" y1="4" x2="17" y2="20" strokeWidth="3.5"/><line x1="21" y1="4" x2="21" y2="20" strokeWidth="2"/></svg>,
   Dl:({size=18,color="currentColor"})=><svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>,
   Spin:({size=18,color="currentColor"})=><svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{animation:'spin 1s linear infinite'}}><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>,
   Bell:({size=18,color="currentColor"})=><svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>,
@@ -309,6 +310,37 @@ function SBar({value,onChange,placeholder}){
           <Ic.Close size={12} color={C.textMuted}/>
         </div>
       )}
+    </div>
+  );
+}
+
+// Campo de leitura por código de barras (leitor USB funciona como teclado: digita rápido + Enter).
+// Fica sempre pronto pra próxima leitura — o próprio chamador decide quando reforçar o foco
+// (ex: depois de confirmar um item, ou ao trocar de aba).
+function BarcodeScan({onScan,disabled,autoFocusKey}){
+  const [v,setV]=useState("");
+  const ref=useRef(null);
+  useEffect(()=>{ if(!disabled&&ref.current) ref.current.focus(); },[autoFocusKey,disabled]);
+  function submit(){
+    const code=v.trim();
+    if(!code) return;
+    setV("");
+    onScan(code);
+  }
+  return (
+    <div style={{position:"relative",flex:1,minWidth:240}}>
+      <div style={{position:"absolute",left:14,top:"50%",transform:"translateY(-50%)",pointerEvents:"none"}}>
+        <Ic.Barcode size={17} color={disabled?C.textMuted:C.primary}/>
+      </div>
+      <input
+        ref={ref}
+        value={v}
+        disabled={disabled}
+        onChange={e=>setV(e.target.value)}
+        onKeyDown={e=>{ if(e.key==="Enter"){ e.preventDefault(); submit(); } }}
+        placeholder={disabled?"Preencha os campos acima para habilitar a leitura":"Clique aqui e escaneie o código de barras..."}
+        style={{width:"100%",padding:"12px 14px 12px 40px",border:"2px solid "+(disabled?C.border:C.primary),borderRadius:10,fontSize:15,fontFamily:"monospace",color:C.text,background:disabled?C.bg:C.card,outline:"none",boxSizing:"border-box",opacity:disabled?0.6:1}}
+      />
     </div>
   );
 }
@@ -824,7 +856,7 @@ function ItemsTab({items,setItems,categories,units,showToast}){
   const [dm,setDm]=useState(false);
   const [td,setTd]=useState(null);
   const [ed,setEd]=useState(null);
-  const ef={name:"",unit:"",category:"",minStock:"",cost:"",supplier:""};
+  const ef={name:"",unit:"",category:"",minStock:"",cost:"",supplier:"",barcode:""};
   const [f,setF]=useState(ef);
   const [sav,setSav]=useState(false);
   const filt=useMemo(()=>items.filter(i=>i.name.toLowerCase().includes(q.toLowerCase())&&(!fc||i.category===fc)),[items,q,fc]);
@@ -835,9 +867,14 @@ function ItemsTab({items,setItems,categories,units,showToast}){
     if(isNaN(ms)||isNaN(c)){showToast("Valores inválidos","error");return;}
     if(ms<0){showToast("Estoque mínimo não pode ser negativo","error");return;}
     if(c<0){showToast("Custo não pode ser negativo","error");return;}
+    const bc=f.barcode.trim();
+    if(bc){
+      const dup=items.find(i=>i.barcode&&i.barcode===bc&&(!ed||i.id!==ed.id));
+      if(dup){showToast('Código de barras já usado no item "'+dup.name+'"',"error");return;}
+    }
     setSav(true);await new Promise(r=>setTimeout(r,300));
-    if(ed){setItems(p=>p.map(i=>i.id===ed.id?{...i,...f,minStock:ms,cost:c}:i));showToast("Atualizado!");}
-    else{setItems(p=>[...p,{id:nid(items),...f,minStock:ms,cost:c,currentStock:0}]);showToast("Cadastrado!");}
+    if(ed){setItems(p=>p.map(i=>i.id===ed.id?{...i,...f,barcode:bc,minStock:ms,cost:c}:i));showToast("Atualizado!");}
+    else{setItems(p=>[...p,{id:nid(items),...f,barcode:bc,minStock:ms,cost:c,currentStock:0}]);showToast("Cadastrado!");}
     setSav(false);setMod(false);
   }
 
@@ -856,8 +893,9 @@ function ItemsTab({items,setItems,categories,units,showToast}){
           {key:"currentStock",label:"Estoque",render:(v,r)=><span style={{fontWeight:700,color:v<=r.minStock?C.danger:C.success}}>{v}</span>},
           {key:"minStock",label:"Mínimo"},
           {key:"cost",label:"Custo",render:v=>fmt(v),nowrap:true},
+          {key:"barcode",label:"Cód. Barras",render:v=>v?<span style={{fontFamily:"monospace",fontSize:12}}>{v}</span>:<span style={{color:C.textMuted}}>—</span>},
         ]} data={filt}
-          onEdit={r=>{setEd(r);setF({name:r.name,unit:r.unit,category:r.category,minStock:String(r.minStock),cost:String(r.cost),supplier:r.supplier||""});setMod(true);}}
+          onEdit={r=>{setEd(r);setF({name:r.name,unit:r.unit,category:r.category,minStock:String(r.minStock),cost:String(r.cost),supplier:r.supplier||"",barcode:r.barcode||""});setMod(true);}}
           onDelete={r=>{setTd(r);setDm(true);}}
           onBulkDelete={ids=>{
             setItems(items.filter(i=>!ids.includes(i.id)));
@@ -875,6 +913,7 @@ function ItemsTab({items,setItems,categories,units,showToast}){
           <Inp label="Custo (R$)" required type="number" step="0.01" value={f.cost} onChange={e=>setF({...f,cost:e.target.value})}/>
         </div>
         <Inp label="Fornecedor" value={f.supplier} onChange={e=>setF({...f,supplier:e.target.value})}/>
+        <Inp label="Código de Barras" value={f.barcode} placeholder="Escaneie ou digite o código..." onChange={e=>setF({...f,barcode:e.target.value})}/>
         <div style={{display:"flex",gap:12,justifyContent:"flex-end",marginTop:20}}>
           <Btn variant="ghost" onClick={()=>setMod(false)} disabled={sav}>Cancelar</Btn>
           <Btn onClick={save} icon={<Ic.Check size={16}/>} loading={sav}>{sav?"Salvando...":"Salvar"}</Btn>
@@ -910,6 +949,34 @@ function InTab({items,setItems,employees,movements,setMovements,showToast}){
   const filt=useMemo(()=>movements.filter(m=>m.type==="in").sort((a,b)=>b.id-a.id).filter(m=>m.itemName.toLowerCase().includes(q.toLowerCase())),[movements,q]);
   const sel=items.find(i=>i.id===Number(f.itemId));
   const fi=useMemo(()=>items.filter(i=>i.name.toLowerCase().includes(iq.toLowerCase())),[items,iq]);
+
+  // ── Leitura por código de barras ──
+  const [scanEmp,setScanEmp]=useState("");
+  const [scanHit,setScanHit]=useState(null); // {item,qty,price}
+  const [scanNotFound,setScanNotFound]=useState("");
+  const [scanKey,setScanKey]=useState(0);
+  const qtyScanRef=useRef(null);
+
+  function onBarcodeScan(code){
+    setScanNotFound("");
+    const item=items.find(i=>i.barcode&&i.barcode===code);
+    if(!item){ setScanNotFound(code); setScanHit(null); return; }
+    setScanHit({item,qty:"1",price:String(item.cost)});
+  }
+  useEffect(()=>{ if(scanHit&&qtyScanRef.current){ qtyScanRef.current.focus(); qtyScanRef.current.select(); } },[scanHit]);
+
+  function confirmScan(){
+    if(!scanHit) return;
+    const qty=Number(scanHit.qty),price=Number(scanHit.price);
+    if(isNaN(qty)||qty<=0){showToast("Quantidade inválida","error");return;}
+    if(isNaN(price)||price<0){showToast("Preço inválido","error");return;}
+    const item=scanHit.item;
+    setMovements(prev=>[...prev,{id:nid(prev),type:"in",itemId:item.id,itemName:item.name,quantity:qty,date:today(),time:nowT(),employee:scanEmp,supplier:item.supplier||"",price,batch:"",expiry:null,notes:"Entrada via leitura de código de barras",invoice:null,reason:null,wasteReason:null}]);
+    setItems(prev=>prev.map(i=>i.id===item.id?{...i,currentStock:i.currentStock+qty}:i));
+    showToast("+"+qty+" "+item.unit+" de "+item.name+" registrado!");
+    setScanHit(null);setScanKey(k=>k+1);
+  }
+  function cancelScan(){ setScanHit(null); setScanKey(k=>k+1); }
 
   function openEdit(row){
     setEd(row);
@@ -956,6 +1023,53 @@ function InTab({items,setItems,employees,movements,setMovements,showToast}){
 
   return (
     <div style={{display:"flex",flexDirection:"column",gap:20}}>
+      <Card style={{padding:18}}>
+        <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:14}}>
+          <Ic.Barcode size={18} color={C.primary}/>
+          <h3 style={{fontSize:14,fontWeight:700,fontFamily:fontD,margin:0}}>Leitura por Código de Barras</h3>
+        </div>
+        <div style={{display:"flex",gap:12,flexWrap:"wrap",alignItems:"flex-end"}}>
+          <div style={{minWidth:220}}>
+            <Sel label="Responsável (uma vez, pra sequência toda)" required options={employees.filter(e=>e.status==="Ativo").map(e=>e.name)} value={scanEmp} onChange={e=>{setScanEmp(e.target.value);setScanKey(k=>k+1);}}/>
+          </div>
+          <div style={{flex:1,minWidth:260,paddingBottom:16}}>
+            <BarcodeScan onScan={onBarcodeScan} disabled={!scanEmp} autoFocusKey={scanKey}/>
+          </div>
+        </div>
+        {scanNotFound&&(
+          <div style={{marginTop:12,background:C.warningLight,border:"1px solid "+C.warning,borderRadius:8,padding:"10px 14px",display:"flex",alignItems:"center",gap:10,fontSize:13,color:C.textSec}}>
+            <Ic.Warn size={16} color={C.warning}/>
+            <span>Código <strong style={{fontFamily:"monospace"}}>{scanNotFound}</strong> não encontrado em nenhum item. Cadastre o código em Itens.</span>
+            <div onClick={()=>setScanNotFound("")} style={{marginLeft:"auto",cursor:"pointer"}}><Ic.Close size={14} color={C.textMuted}/></div>
+          </div>
+        )}
+        {scanHit&&(
+          <div style={{marginTop:12,background:C.successLight,border:"1px solid "+C.success,borderRadius:10,padding:14,display:"flex",alignItems:"flex-end",gap:14,flexWrap:"wrap"}}>
+            <div style={{minWidth:160}}>
+              <div style={{fontSize:15,fontWeight:700,color:C.text}}>{scanHit.item.name}</div>
+              <div style={{fontSize:12,color:C.textSec,marginTop:2}}>Estoque atual: {scanHit.item.currentStock} {scanHit.item.unit}</div>
+            </div>
+            <div style={{width:110}}>
+              <FF label="Quantidade" noMargin>
+                <input ref={qtyScanRef} type="number" min="0.01" step="any" value={scanHit.qty}
+                  onChange={e=>setScanHit({...scanHit,qty:e.target.value})}
+                  onKeyDown={e=>{if(e.key==="Enter"){e.preventDefault();confirmScan();}}}
+                  style={{...iS,padding:"8px 10px"}}/>
+              </FF>
+            </div>
+            <div style={{width:130}}>
+              <FF label="Preço Unit. (R$)" noMargin>
+                <input type="number" min="0" step="0.01" value={scanHit.price}
+                  onChange={e=>setScanHit({...scanHit,price:e.target.value})}
+                  onKeyDown={e=>{if(e.key==="Enter"){e.preventDefault();confirmScan();}}}
+                  style={{...iS,padding:"8px 10px"}}/>
+              </FF>
+            </div>
+            <Btn variant="success" onClick={confirmScan} icon={<Ic.Check size={16}/>}>Confirmar</Btn>
+            <Btn variant="ghost" onClick={cancelScan} icon={<Ic.Close size={16}/>}>Cancelar</Btn>
+          </div>
+        )}
+      </Card>
       <div style={{display:"flex",gap:12,flexWrap:"wrap"}}>
         <SBar value={q} onChange={setQ} placeholder="Buscar entrada..."/>
         <Btn onClick={()=>{setEd(null);setF({...ef,date:today(),time:nowT()});setIq("");setMod(true);}} variant="success" icon={<Ic.Up size={16}/>}>Nova Entrada</Btn>
@@ -1057,6 +1171,36 @@ function OutTab({items,setItems,employees,movements,setMovements,showToast}){
   const sel=items.find(i=>i.id===Number(f.itemId));
   const fi=useMemo(()=>items.filter(i=>i.name.toLowerCase().includes(iq.toLowerCase())),[items,iq]);
 
+  // ── Leitura por código de barras ──
+  const [scanEmp,setScanEmp]=useState("");
+  const [scanReason,setScanReason]=useState("");
+  const [scanHit,setScanHit]=useState(null); // {item,qty}
+  const [scanNotFound,setScanNotFound]=useState("");
+  const [scanKey,setScanKey]=useState(0);
+  const qtyScanRef=useRef(null);
+  const scanReady=!!scanEmp&&!!scanReason;
+
+  function onBarcodeScan(code){
+    setScanNotFound("");
+    const item=items.find(i=>i.barcode&&i.barcode===code);
+    if(!item){ setScanNotFound(code); setScanHit(null); return; }
+    setScanHit({item,qty:"1"});
+  }
+  useEffect(()=>{ if(scanHit&&qtyScanRef.current){ qtyScanRef.current.focus(); qtyScanRef.current.select(); } },[scanHit]);
+
+  function confirmScan(){
+    if(!scanHit) return;
+    const qty=Number(scanHit.qty);
+    const item=scanHit.item;
+    if(isNaN(qty)||qty<=0){showToast("Quantidade inválida","error");return;}
+    if(qty>item.currentStock){showToast("Insuficiente! Disponível: "+item.currentStock,"error");return;}
+    setMovements(prev=>[...prev,{id:nid(prev),type:"out",itemId:item.id,itemName:item.name,quantity:qty,date:today(),time:nowT(),employee:scanEmp,reason:scanReason,wasteReason:null,notes:"Saída via leitura de código de barras",supplier:null,price:null,batch:null,expiry:null,invoice:null}]);
+    setItems(prev=>prev.map(i=>i.id===item.id?{...i,currentStock:i.currentStock-qty}:i));
+    showToast("-"+qty+" "+item.unit+" de "+item.name+" registrado!");
+    setScanHit(null);setScanKey(k=>k+1);
+  }
+  function cancelScan(){ setScanHit(null); setScanKey(k=>k+1); }
+
   function openEdit(row){
     setEd(row);
     setF({itemId:String(row.itemId),quantity:String(row.quantity),employee:row.employee,date:row.date,time:row.time,reason:row.reason||""});
@@ -1103,6 +1247,48 @@ function OutTab({items,setItems,employees,movements,setMovements,showToast}){
 
   return (
     <div style={{display:"flex",flexDirection:"column",gap:20}}>
+      <Card style={{padding:18}}>
+        <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:14}}>
+          <Ic.Barcode size={18} color={C.primary}/>
+          <h3 style={{fontSize:14,fontWeight:700,fontFamily:fontD,margin:0}}>Leitura por Código de Barras</h3>
+        </div>
+        <div style={{display:"flex",gap:12,flexWrap:"wrap",alignItems:"flex-end"}}>
+          <div style={{minWidth:200}}>
+            <Sel label="Responsável (uma vez, pra sequência toda)" required options={employees.filter(e=>e.status==="Ativo").map(e=>e.name)} value={scanEmp} onChange={e=>{setScanEmp(e.target.value);setScanKey(k=>k+1);}}/>
+          </div>
+          <div style={{minWidth:200}}>
+            <Sel label="Motivo (uma vez, pra sequência toda)" required options={EXIT_R} value={scanReason} onChange={e=>{setScanReason(e.target.value);setScanKey(k=>k+1);}}/>
+          </div>
+          <div style={{flex:1,minWidth:260,paddingBottom:16}}>
+            <BarcodeScan onScan={onBarcodeScan} disabled={!scanReady} autoFocusKey={scanKey}/>
+          </div>
+        </div>
+        {scanNotFound&&(
+          <div style={{marginTop:12,background:C.warningLight,border:"1px solid "+C.warning,borderRadius:8,padding:"10px 14px",display:"flex",alignItems:"center",gap:10,fontSize:13,color:C.textSec}}>
+            <Ic.Warn size={16} color={C.warning}/>
+            <span>Código <strong style={{fontFamily:"monospace"}}>{scanNotFound}</strong> não encontrado em nenhum item. Cadastre o código em Itens.</span>
+            <div onClick={()=>setScanNotFound("")} style={{marginLeft:"auto",cursor:"pointer"}}><Ic.Close size={14} color={C.textMuted}/></div>
+          </div>
+        )}
+        {scanHit&&(
+          <div style={{marginTop:12,background:scanHit.qty>scanHit.item.currentStock?C.dangerLight:C.successLight,border:"1px solid "+(scanHit.qty>scanHit.item.currentStock?C.danger:C.success),borderRadius:10,padding:14,display:"flex",alignItems:"flex-end",gap:14,flexWrap:"wrap"}}>
+            <div style={{minWidth:160}}>
+              <div style={{fontSize:15,fontWeight:700,color:C.text}}>{scanHit.item.name}</div>
+              <div style={{fontSize:12,color:C.textSec,marginTop:2}}>Estoque atual: {scanHit.item.currentStock} {scanHit.item.unit}</div>
+            </div>
+            <div style={{width:110}}>
+              <FF label="Quantidade" noMargin>
+                <input ref={qtyScanRef} type="number" min="0.01" step="any" value={scanHit.qty}
+                  onChange={e=>setScanHit({...scanHit,qty:e.target.value})}
+                  onKeyDown={e=>{if(e.key==="Enter"){e.preventDefault();confirmScan();}}}
+                  style={{...iS,padding:"8px 10px"}}/>
+              </FF>
+            </div>
+            <Btn variant="danger" onClick={confirmScan} icon={<Ic.Check size={16}/>}>Confirmar</Btn>
+            <Btn variant="ghost" onClick={cancelScan} icon={<Ic.Close size={16}/>}>Cancelar</Btn>
+          </div>
+        )}
+      </Card>
       <div style={{display:"flex",gap:12,flexWrap:"wrap"}}>
         <SBar value={q} onChange={setQ} placeholder="Buscar saída..."/>
         <Btn onClick={()=>{setEd(null);setF({...ef,date:today(),time:nowT()});setIq("");setMod(true);}} variant="danger" icon={<Ic.Down size={16}/>}>Nova Saída</Btn>
