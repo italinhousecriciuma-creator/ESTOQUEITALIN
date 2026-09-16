@@ -537,6 +537,7 @@ function KioskOut({items,employees,setItems,movements,setMovements,showToast,onE
   const [emp,setEmp]=useState(""); // pergunta de novo a cada scan, de propósito
   const [notFound,setNotFound]=useState("");
   const [scanKey,setScanKey]=useState(0);
+  const qtyRef=useRef(null);
   const activeEmps=useMemo(()=>employees.filter(e=>e.status==="Ativo"),[employees]);
   const recent=useMemo(()=>movements.filter(m=>m.type==="out").sort((a,b)=>b.id-a.id).slice(0,6),[movements]);
 
@@ -547,6 +548,7 @@ function KioskOut({items,employees,setItems,movements,setMovements,showToast,onE
     setHit({item,qty:"1"});
     setEmp("");
   }
+  useEffect(()=>{ if(hit&&qtyRef.current){ qtyRef.current.focus(); qtyRef.current.select(); } },[hit]);
 
   function confirm(){
     if(!hit) return;
@@ -607,7 +609,7 @@ function KioskOut({items,employees,setItems,movements,setMovements,showToast,onE
 
             <div>
               <div style={{fontSize:13,fontWeight:700,color:C.textSec,marginBottom:8}}>Quantidade</div>
-              <input type="number" min="0.01" step="any" value={hit.qty}
+              <input ref={qtyRef} type="number" min="0.01" step="any" value={hit.qty}
                 onChange={e=>setHit({...hit,qty:e.target.value})}
                 onKeyDown={e=>{if(e.key==="Enter"){e.preventDefault();confirm();}}}
                 style={{width:150,padding:"16px 18px",fontSize:24,fontWeight:800,border:"2px solid "+C.border,borderRadius:12,textAlign:"center",fontFamily:font,boxSizing:"border-box"}}/>
