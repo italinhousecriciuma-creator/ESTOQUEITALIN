@@ -317,7 +317,7 @@ function SBar({value,onChange,placeholder}){
 // Campo de leitura por código de barras (leitor USB funciona como teclado: digita rápido + Enter).
 // Fica sempre pronto pra próxima leitura — o próprio chamador decide quando reforçar o foco
 // (ex: depois de confirmar um item, ou ao trocar de aba).
-function BarcodeScan({onScan,disabled,autoFocusKey}){
+function BarcodeScan({onScan,disabled,autoFocusKey,big}){
   const [v,setV]=useState("");
   const ref=useRef(null);
   useEffect(()=>{ if(!disabled&&ref.current) ref.current.focus(); },[autoFocusKey,disabled]);
@@ -329,8 +329,8 @@ function BarcodeScan({onScan,disabled,autoFocusKey}){
   }
   return (
     <div style={{position:"relative",flex:1,minWidth:240}}>
-      <div style={{position:"absolute",left:14,top:"50%",transform:"translateY(-50%)",pointerEvents:"none"}}>
-        <Ic.Barcode size={17} color={disabled?C.textMuted:C.primary}/>
+      <div style={{position:"absolute",left:big?18:14,top:"50%",transform:"translateY(-50%)",pointerEvents:"none"}}>
+        <Ic.Barcode size={big?24:17} color={disabled?C.textMuted:C.primary}/>
       </div>
       <input
         ref={ref}
@@ -339,7 +339,7 @@ function BarcodeScan({onScan,disabled,autoFocusKey}){
         onChange={e=>setV(e.target.value)}
         onKeyDown={e=>{ if(e.key==="Enter"){ e.preventDefault(); submit(); } }}
         placeholder={disabled?"Preencha os campos acima para habilitar a leitura":"Clique aqui e escaneie o código de barras..."}
-        style={{width:"100%",padding:"12px 14px 12px 40px",border:"2px solid "+(disabled?C.border:C.primary),borderRadius:10,fontSize:15,fontFamily:"monospace",color:C.text,background:disabled?C.bg:C.card,outline:"none",boxSizing:"border-box",opacity:disabled?0.6:1}}
+        style={{width:"100%",padding:big?"20px 18px 20px 54px":"12px 14px 12px 40px",border:(big?"3px":"2px")+" solid "+(disabled?C.border:C.primary),borderRadius:big?14:10,fontSize:big?20:15,fontFamily:"monospace",color:C.text,background:disabled?C.bg:C.card,outline:"none",boxSizing:"border-box",opacity:disabled?0.6:1}}
       />
     </div>
   );
@@ -530,9 +530,129 @@ function DT({columns,data,onEdit,onDelete,actions,onBulkDelete,pageSize=PG}){
   );
 }
 
+// ===== MODO QUIOSQUE (SAÍDA — TABLET FIXO NO ESTOQUE) =====
+function KioskOut({items,employees,setItems,movements,setMovements,showToast,onExit}){
+  const [reason,setReason]=useState("");
+  const [hit,setHit]=useState(null); // {item,qty}
+  const [emp,setEmp]=useState(""); // pergunta de novo a cada scan, de propósito
+  const [notFound,setNotFound]=useState("");
+  const [scanKey,setScanKey]=useState(0);
+  const activeEmps=useMemo(()=>employees.filter(e=>e.status==="Ativo"),[employees]);
+  const recent=useMemo(()=>movements.filter(m=>m.type==="out").sort((a,b)=>b.id-a.id).slice(0,6),[movements]);
+
+  function onScan(code){
+    setNotFound("");
+    const item=items.find(i=>i.barcode&&i.barcode===code);
+    if(!item){ setNotFound(code); setHit(null); return; }
+    setHit({item,qty:"1"});
+    setEmp("");
+  }
+
+  function confirm(){
+    if(!hit) return;
+    if(!emp){ showToast("Escolha quem está retirando","error"); return; }
+    const qty=Number(hit.qty);
+    if(isNaN(qty)||qty<=0){ showToast("Quantidade inválida","error"); return; }
+    if(qty>hit.item.currentStock){ showToast("Insuficiente! Disponível: "+hit.item.currentStock,"error"); return; }
+    setMovements(prev=>[...prev,{id:nid(prev),type:"out",itemId:hit.item.id,itemName:hit.item.name,quantity:qty,date:today(),time:nowT(),employee:emp,reason,wasteReason:null,notes:"Saída via quiosque (tablet)",supplier:null,price:null,batch:null,expiry:null,invoice:null}]);
+    setItems(prev=>prev.map(i=>i.id===hit.item.id?{...i,currentStock:i.currentStock-qty}:i));
+    showToast("-"+qty+" "+hit.item.unit+" de "+hit.item.name);
+    setHit(null);setEmp("");setScanKey(k=>k+1);
+  }
+  function cancel(){ setHit(null); setEmp(""); setScanKey(k=>k+1); }
+
+  const chipStyle=(active)=>({padding:"16px 20px",borderRadius:14,border:(active?"3px":"2px")+" solid "+(active?C.primary:C.border),background:active?C.primaryLight:C.card,color:active?C.primary:C.text,fontSize:16,fontWeight:700,fontFamily:font,cursor:"pointer",minWidth:140});
+  const empChipStyle=(active)=>({padding:"16px 20px",borderRadius:14,border:(active?"3px":"2px")+" solid "+(active?C.primary:C.border),background:active?C.primaryLight:C.bg,color:active?C.primary:C.text,fontSize:16,fontWeight:700,fontFamily:font,cursor:"pointer",minWidth:140});
+
+  return (
+    <div style={{minHeight:"100vh",background:C.bg,display:"flex",flexDirection:"column",fontFamily:font}}>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"18px 26px",background:C.text,color:"#fff",flexShrink:0}}>
+        <div style={{display:"flex",alignItems:"center",gap:12}}>
+          <Ic.Barcode size={26}/>
+          <span style={{fontSize:20,fontWeight:800,fontFamily:fontD}}>Saída de Estoque</span>
+        </div>
+        <button onClick={()=>{ if(window.confirm("Sair do modo quiosque?")) onExit(); }}
+          style={{background:"rgba(255,255,255,.14)",border:"none",color:"#fff",padding:"12px 18px",borderRadius:10,fontSize:14,fontWeight:600,fontFamily:font,cursor:"pointer"}}>
+          Sair do Quiosque
+        </button>
+      </div>
+
+      <div style={{flex:1,padding:"24px 20px",display:"flex",flexDirection:"column",gap:22,maxWidth:820,margin:"0 auto",width:"100%",boxSizing:"border-box"}}>
+        <div>
+          <div style={{fontSize:14,fontWeight:700,color:C.textSec,marginBottom:10}}>Motivo da saída</div>
+          <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
+            {EXIT_R.map(r=><button key={r} onClick={()=>setReason(r)} style={chipStyle(reason===r)}>{r}</button>)}
+          </div>
+        </div>
+
+        <div>
+          <div style={{fontSize:14,fontWeight:700,color:C.textSec,marginBottom:10}}>{reason?"Escaneie o item":"Escolha o motivo acima pra habilitar a leitura"}</div>
+          <BarcodeScan onScan={onScan} disabled={!reason} autoFocusKey={scanKey} big/>
+        </div>
+
+        {notFound&&(
+          <div style={{background:C.warningLight,border:"2px solid "+C.warning,borderRadius:14,padding:18,fontSize:16,color:C.text,display:"flex",alignItems:"center",gap:12}}>
+            <Ic.Warn size={22} color={C.warning}/>
+            <span>Código <strong style={{fontFamily:"monospace"}}>{notFound}</strong> não encontrado.</span>
+            <button onClick={()=>setNotFound("")} style={{marginLeft:"auto",background:"none",border:"none",cursor:"pointer",padding:6}}><Ic.Close size={20} color={C.textMuted}/></button>
+          </div>
+        )}
+
+        {hit&&(
+          <div style={{background:Number(hit.qty)>hit.item.currentStock?C.dangerLight:C.card,border:"3px solid "+(Number(hit.qty)>hit.item.currentStock?C.danger:C.primary),borderRadius:18,padding:24,display:"flex",flexDirection:"column",gap:20}}>
+            <div>
+              <div style={{fontSize:24,fontWeight:800,color:C.text,fontFamily:fontD}}>{hit.item.name}</div>
+              <div style={{fontSize:15,color:C.textSec,marginTop:4}}>Estoque atual: <strong>{hit.item.currentStock} {hit.item.unit}</strong></div>
+            </div>
+
+            <div>
+              <div style={{fontSize:13,fontWeight:700,color:C.textSec,marginBottom:8}}>Quantidade</div>
+              <input type="number" min="0.01" step="any" value={hit.qty}
+                onChange={e=>setHit({...hit,qty:e.target.value})}
+                onKeyDown={e=>{if(e.key==="Enter"){e.preventDefault();confirm();}}}
+                style={{width:150,padding:"16px 18px",fontSize:24,fontWeight:800,border:"2px solid "+C.border,borderRadius:12,textAlign:"center",fontFamily:font,boxSizing:"border-box"}}/>
+            </div>
+
+            <div>
+              <div style={{fontSize:13,fontWeight:700,color:C.textSec,marginBottom:8}}>Quem está retirando? <span style={{color:C.danger}}>*</span></div>
+              {activeEmps.length===0
+                ?<div style={{fontSize:13,color:C.textMuted}}>Nenhum funcionário ativo cadastrado.</div>
+                :<div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
+                  {activeEmps.map(e=><button key={e.id} onClick={()=>setEmp(e.name)} style={empChipStyle(emp===e.name)}>{e.name}</button>)}
+                </div>}
+            </div>
+
+            <div style={{display:"flex",gap:14}}>
+              <button onClick={confirm} style={{flex:1,padding:"20px",borderRadius:14,border:"none",background:C.danger,color:"#fff",fontSize:19,fontWeight:800,fontFamily:font,cursor:"pointer"}}>Confirmar Saída</button>
+              <button onClick={cancel} style={{padding:"20px 26px",borderRadius:14,border:"2px solid "+C.border,background:C.card,color:C.textSec,fontSize:16,fontWeight:700,fontFamily:font,cursor:"pointer"}}>Cancelar</button>
+            </div>
+          </div>
+        )}
+
+        {recent.length>0&&(
+          <div>
+            <div style={{fontSize:13,fontWeight:700,color:C.textMuted,marginBottom:8}}>Últimas saídas</div>
+            <div style={{display:"flex",flexDirection:"column",gap:6}}>
+              {recent.map(m=>(
+                <div key={m.id} style={{display:"flex",justifyContent:"space-between",gap:10,padding:"10px 14px",background:C.card,borderRadius:10,border:"1px solid "+C.border,fontSize:13,color:C.textSec}}>
+                  <span><strong style={{color:C.text}}>{m.itemName}</strong> — {m.quantity} {items.find(i=>i.id===m.itemId)?.unit||""}</span>
+                  <span>{m.employee} · {m.time}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ===== APP =====
 function App(){
   const [tab,setTab]=useState("dashboard");
+  const [kiosk,setKiosk]=useState(()=>{ try{ return localStorage.getItem('italin:kiosk')==='1'; }catch(e){ return false; } });
+  const enterKiosk=useCallback(()=>{ setKiosk(true); try{localStorage.setItem('italin:kiosk','1');}catch(e){} },[]);
+  const exitKiosk=useCallback(()=>{ setKiosk(false); try{localStorage.removeItem('italin:kiosk');}catch(e){} },[]);
   const [items,setItems]=useState([]);
   const [emps,setEmps]=useState([]);
   const [movs,setMovs]=useState([]);
@@ -678,7 +798,7 @@ function App(){
     {id:"settings",label:"Configurações",IC:Ic.Cog},
   ];
 
-  const rp={items,setItems,employees:emps,setEmployees:setEmps,movements:movs,setMovements:setMovs,portioning:port,setPortioning:setPort,wastes,setWastes,categories:cats,setCategories:setCats,units,setUnits,showToast,criticalItems:crit,totalValue:totVal,monthIn:thisM.filter(m=>m.type==="in").length,monthOut:thisM.filter(m=>m.type==="out").length,onResetDb:resetDb,doReset};
+  const rp={items,setItems,employees:emps,setEmployees:setEmps,movements:movs,setMovements:setMovs,portioning:port,setPortioning:setPort,wastes,setWastes,categories:cats,setCategories:setCats,units,setUnits,showToast,criticalItems:crit,totalValue:totVal,monthIn:thisM.filter(m=>m.type==="in").length,monthOut:thisM.filter(m=>m.type==="out").length,onResetDb:resetDb,doReset,onEnterKiosk:enterKiosk};
 
   function renderTab(){
     switch(tab){
@@ -723,6 +843,10 @@ function App(){
         </div>
       </div>
     );
+  }
+
+  if(kiosk){
+    return <KioskOut items={items} employees={emps} setItems={setItems} movements={movs} setMovements={setMovs} showToast={showToast} onExit={exitKiosk}/>;
   }
 
   return (
@@ -1813,7 +1937,7 @@ function RepTab({items,movements}){
 }
 
 // ===== CONFIGURAÇÕES =====
-function SettTab({categories,setCategories,units,setUnits,items,showToast,onResetDb}){
+function SettTab({categories,setCategories,units,setUnits,items,showToast,onResetDb,onEnterKiosk}){
   const [nc,setNc]=useState("");
   const [nu,setNu]=useState("");
   const [confirmDel,setConfirmDel]=useState(null); // {type:'cat'|'unit', value, count}
@@ -1848,6 +1972,17 @@ function SettTab({categories,setCategories,units,setUnits,items,showToast,onRese
 
   return (
     <div style={{display:"flex",flexDirection:"column",gap:20}}>
+      <Card style={{padding:24,border:"2px solid "+C.primaryLight}}>
+        <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:10}}>
+          <Ic.Barcode size={20} color={C.primary}/>
+          <h3 style={{fontSize:16,fontWeight:700,fontFamily:fontD,margin:0}}>Modo Quiosque (Saída por Tablet)</h3>
+        </div>
+        <p style={{fontSize:13,color:C.textSec,marginBottom:16}}>
+          Deixa esse aparelho fixo mostrando só a tela de leitura de código de barras pra dar saída, em tela cheia,
+          sem acesso ao resto do sistema. Fica configurado só neste navegador/tablet — os outros continuam normais.
+        </p>
+        <Btn onClick={onEnterKiosk} variant="secondary" icon={<Ic.Barcode size={16}/>}>Ativar Modo Quiosque neste aparelho</Btn>
+      </Card>
       <Card style={{padding:24}}>
         <h3 style={{fontSize:16,fontWeight:700,marginBottom:16,fontFamily:fontD}}>Categorias</h3>
         <div style={{display:"flex",gap:8,marginBottom:12}}>
