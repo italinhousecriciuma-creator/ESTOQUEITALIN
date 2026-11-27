@@ -71,6 +71,8 @@ const Ic={
   NoCloud:({size=18,color="currentColor"})=><svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22.61 16.95A5 5 0 0 0 18 10h-1.26a8 8 0 0 0-7.05-6M5 5a8 8 0 0 0 4 15h9a5 5 0 0 0 1.7-.3"/><line x1="1" y1="1" x2="23" y2="23"/></svg>,
   DB:({size=18,color="currentColor"})=><svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>,
   Store:({size=18,color="currentColor"})=><svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 8.35V20a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V8.35A2 2 0 0 1 3.26 6.5l8-3.2a2 2 0 0 1 1.48 0l8 3.2A2 2 0 0 1 22 8.35z"/><path d="M6 18h12M6 14h12M6 10h12"/></svg>,
+  Expand:({size=18,color="currentColor"})=><svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3M16 21h3a2 2 0 0 0 2-2v-3"/></svg>,
+  Shrink:({size=18,color="currentColor"})=><svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M8 3v3a2 2 0 0 1-2 2H3M21 8h-3a2 2 0 0 1-2-2V3M3 16h3a2 2 0 0 1 2 2v3M16 21v-3a2 2 0 0 1 2-2h3"/></svg>,
 };
 
 // Pure SVG chart
@@ -531,6 +533,43 @@ function DT({columns,data,onEdit,onDelete,actions,onBulkDelete,pageSize=PG}){
 }
 
 // ===== MODO QUIOSQUE (SAÍDA — TABLET FIXO NO ESTOQUE) =====
+// ===== TELA CHEIA (Fullscreen API do navegador) =====
+function getFsEl(){ return document.fullscreenElement||document.webkitFullscreenElement||null; }
+function FullscreenBtn({dark}){
+  const el=document.documentElement;
+  const supported=!!(el.requestFullscreen||el.webkitRequestFullscreen);
+  const [isFs,setIsFs]=useState(()=>!!getFsEl());
+  useEffect(()=>{
+    const h=()=>setIsFs(!!getFsEl());
+    document.addEventListener("fullscreenchange",h);
+    document.addEventListener("webkitfullscreenchange",h);
+    return ()=>{ document.removeEventListener("fullscreenchange",h); document.removeEventListener("webkitfullscreenchange",h); };
+  },[]);
+  if(!supported) return null;
+  function toggle(){
+    try{
+      if(getFsEl()){
+        const ex=document.exitFullscreen||document.webkitExitFullscreen;
+        if(ex){ const r=ex.call(document); if(r&&r.catch) r.catch(()=>{}); }
+      }else{
+        const rq=el.requestFullscreen||el.webkitRequestFullscreen;
+        const r=rq.call(el); if(r&&r.catch) r.catch(()=>{});
+      }
+    }catch(e){}
+  }
+  const label=isFs?"Sair da tela cheia":"Tela cheia";
+  const st=dark
+    ?{background:"rgba(255,255,255,.14)",border:"none",color:"#fff",padding:"12px 18px",borderRadius:10,fontSize:14}
+    :{background:C.bg,border:"1px solid "+C.border,color:C.textSec,padding:"7px 12px",borderRadius:8,fontSize:12};
+  return (
+    <button onClick={toggle} title={label} aria-label={label}
+      style={{...st,display:"flex",alignItems:"center",gap:8,fontWeight:600,fontFamily:font,cursor:"pointer",whiteSpace:"nowrap"}}>
+      {isFs?<Ic.Shrink size={dark?18:16}/>:<Ic.Expand size={dark?18:16}/>}
+      {label}
+    </button>
+  );
+}
+
 function KioskOut({items,employees,setItems,movements,setMovements,showToast,onExit}){
   const [reason,setReason]=useState("");
   const [hit,setHit]=useState(null); // {item,qty}
@@ -573,10 +612,13 @@ function KioskOut({items,employees,setItems,movements,setMovements,showToast,onE
           <Ic.Barcode size={26}/>
           <span style={{fontSize:20,fontWeight:800,fontFamily:fontD}}>Saída de Estoque</span>
         </div>
+        <div style={{display:"flex",alignItems:"center",gap:10}}>
+        <FullscreenBtn dark/>
         <button onClick={()=>{ if(window.confirm("Sair do modo quiosque?")) onExit(); }}
           style={{background:"rgba(255,255,255,.14)",border:"none",color:"#fff",padding:"12px 18px",borderRadius:10,fontSize:14,fontWeight:600,fontFamily:font,cursor:"pointer"}}>
           Sair do Quiosque
         </button>
+        </div>
       </div>
 
       <div style={{flex:1,padding:"24px 20px",display:"flex",flexDirection:"column",gap:22,maxWidth:820,margin:"0 auto",width:"100%",boxSizing:"border-box"}}>
@@ -903,6 +945,7 @@ function App(){
             <p style={{fontSize:11,color:C.textMuted,marginTop:2}}>{new Date().toLocaleDateString("pt-BR",{weekday:"long",day:"numeric",month:"long"})}</p>
           </div>
           <div style={{display:"flex",alignItems:"center",gap:12,flexShrink:0}}>
+            <FullscreenBtn/>
             <DbStatus status={dbSt} lastSaved={lsav}/>
             <div style={{position:"relative",cursor:"pointer"}}>
               <Ic.Bell size={20} color={C.textSec}/>
