@@ -126,6 +126,8 @@ function LineChart({data,height=240}){
 
 // DB
 const DB_KEYS={items:'italin:items',employees:'italin:employees',movements:'italin:movements',portioning:'italin:portioning',categories:'italin:categories',units:'italin:units',waste:'italin:waste'};
+// Ordem importa: "items" primeiro (as outras listas referenciam itemId)
+const SYNC_KEYS=[["items",DB_KEYS.items],["emps",DB_KEYS.employees],["movs",DB_KEYS.movements],["port",DB_KEYS.portioning],["wastes",DB_KEYS.waste],["cats",DB_KEYS.categories],["units",DB_KEYS.units]];
 // IMPORTANTE: save/load/clearAll NÃO engolem mais erros — eles propagam (throw),
 // para que o App saiba de verdade quando algo falhou e nunca trate uma falha
 // de rede/banco como "sem dados ainda".
@@ -142,10 +144,10 @@ const db={
   },
   // Usa sendBeacon (não cancela quando a aba fecha) como melhor esforço; fetch normal
   // continua sendo o caminho principal enquanto a página está viva.
-  saveBeacon(k,d){
+  saveBeacon(k,d,expect){
     try{
       if(navigator.sendBeacon){
-        const blob=new Blob([JSON.stringify({key:k,value:d})],{type:'application/json'});
+        const blob=new Blob([JSON.stringify({key:k,value:d,expect})],{type:'application/json'});
         return navigator.sendBeacon('/api/db',blob);
       }
     }catch(e){}
@@ -171,8 +173,96 @@ const db={
     }
     if(!r.ok) throw new Error('Falha ao resetar: HTTP '+r.status);
     return true;
+  },
+  // Carrega valor + versão. Com API antiga, version vem null (o app continua funcionando).
+  // known: versão que o aparelho já tem — se nada mudou, a API responde só {unchanged:true}.
+  async loadMeta(k,known){
+    let r;
+    try{
+      r=await fetch('/api/db?meta=1&key='+encodeURIComponent(k)+(known?'&ifnot='+encodeURIComponent(known):''),{cache:'no-store'});
+    }catch(e){
+      throw new Error('Falha de rede ao carregar "'+k+'": '+e.message);
+    }
+    if(!r.ok) throw new Error('Falha ao carregar "'+k+'": HTTP '+r.status);
+    const data=await r.json();
+    if(data&&typeof data==='object'&&!Array.isArray(data)&&'version' in data){
+      return {value:data.value===undefined?null:data.value,version:data.version,unchanged:!!data.unchanged};
+    }
+    return {value:data===undefined?null:data,version:null,unchanged:false};
+  },
+  // Salva só se a versão no servidor ainda for "expect". Em conflito devolve o valor atual.
+  async saveV(k,d,expect){
+    let r;
+    try{
+      r=await fetch('/api/db',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:k,value:d,expect:expect==null?undefined:expect})});
+    }catch(e){
+      throw new Error('Falha de rede ao salvar "'+k+'": '+e.message);
+    }
+    if(r.status===409){
+      const j=await r.json();
+      return {conflict:true,value:j.value===undefined?null:j.value,version:j.version};
+    }
+    if(!r.ok) throw new Error('Falha ao salvar "'+k+'": HTTP '+r.status);
+    let j={};try{j=await r.json();}catch(e){}
+    return {ok:true,version:j&&j.version!=null?j.version:null};
   }
 };
+
+// ===== MESCLAGEM ENTRE APARELHOS =====
+// Junta as alterações feitas NESTE aparelho (diferença entre "base" e "local")
+// com o que está no servidor (que pode ter sido alterado por outro aparelho).
+// - Estoque (currentStock): soma a DIFERENÇA (ex.: tablet tirou 1 e PC deu entrada de 5 → ambos valem)
+// - Outros campos: só os campos alterados aqui são aplicados por cima do servidor
+// - Registros novos com o mesmo id criados em dois aparelhos ganham id novo (sem perder nenhum)
+const jeq=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
+const NUM_DELTA={currentStock:true};
+function mergeStrList(base,local,server){
+  const removed=base.filter(x=>!local.includes(x));
+  const added=local.filter(x=>!base.includes(x));
+  const out=server.filter(x=>!removed.includes(x));
+  added.forEach(x=>{ if(!out.includes(x)) out.push(x); });
+  return out;
+}
+function mergeObjList(base,local,server,refRemap){
+  const fix=r=>(refRemap&&r&&r.itemId!=null&&refRemap[r.itemId]!=null)?{...r,itemId:refRemap[r.itemId]}:r;
+  const bM=new Map(base.map(x=>[x.id,x])), lM=new Map(local.map(x=>[x.id,x])), sM=new Map(server.map(x=>[x.id,x]));
+  const out=[], remap={};
+  server.forEach(sv=>{
+    const b=bM.get(sv.id), l=lM.get(sv.id);
+    if(b&&!l) return; // apagado neste aparelho
+    if(b&&l&&!jeq(b,l)){
+      const lf=fix(l), m={...sv};
+      Object.keys({...b,...lf}).forEach(k=>{
+        if(jeq(b[k],lf[k])) return;
+        if(NUM_DELTA[k]&&typeof b[k]==="number"&&typeof lf[k]==="number"&&typeof sv[k]==="number") m[k]=sv[k]+(lf[k]-b[k]);
+        else if(k in lf) m[k]=lf[k]; else delete m[k];
+      });
+      out.push(m); return;
+    }
+    out.push(sv);
+  });
+  let maxId=0;
+  [...server,...local].forEach(x=>{ const n=Number(x.id); if(!isNaN(n)&&n>maxId) maxId=n; });
+  local.forEach(l=>{
+    if(bM.has(l.id)) return;
+    const lf=fix(l), sv=sM.get(l.id);
+    if(!sv){ out.push(lf); return; }
+    // mesmo id criado em outro aparelho (mesmo que com conteúdo idêntico, ex.: duas saídas iguais no mesmo minuto)
+    const novo=++maxId; remap[l.id]=novo; out.push({...lf,id:novo});
+  });
+  return {list:out,remap};
+}
+function merge3(base,local,server,refRemap){
+  const hasRemap=refRemap&&Object.keys(refRemap).length>0;
+  if(server==null) return {list:local,remap:{}};
+  if(base==null) base=[];
+  if(local===base||jeq(local,base)) return {list:server,remap:{}};
+  if(!hasRemap&&jeq(server,base)) return {list:local,remap:{}};
+  const all=[...base,...local,...server];
+  if(all.every(x=>typeof x==="string")) return {list:mergeStrList(base,local,server),remap:{}};
+  if(all.every(x=>x&&typeof x==="object"&&"id" in x)) return mergeObjList(base,local,server,refRemap);
+  return {list:local,remap:{}}; // formato desconhecido: mantém o comportamento antigo
+}
 
 // Initial data — categorias e unidades padrão (sem dados de teste)
 const iCat=["Perecíveis","Secos","Bebidas","Embalagens","Limpeza","Temperos"];
@@ -714,12 +804,22 @@ function App(){
   const ref=useRef({}); // último snapshot CONFIRMADO como salvo no banco
   const pend=useRef(null); // snapshot pendente (ainda não confirmado) para retry/flush
   const tmr=useRef(null);
+  const vers=useRef({}); // versão do servidor de cada lista (null/ausente = desconhecida ou API antiga)
+  const saving=useRef(false); // trava: um salvamento por vez
+  const again=useRef(false); // pediram outro salvamento enquanto um estava em andamento
+  const flushRef=useRef(null);
+  const SETTERS=useRef({});
+  SETTERS.current={items:setItems,emps:setEmps,movs:setMovs,port:setPort,wastes:setWastes,cats:setCats,units:setUnits};
   const showToast=useCallback((m,t="success")=>setToast({message:m,type:t,key:Date.now()}),[]);
 
   const loadAll=useCallback(async()=>{
     setLoadErr(null);
     try{
-      const[si,se,sm,sp,sc,su,sw]=await Promise.all([db.load(DB_KEYS.items),db.load(DB_KEYS.employees),db.load(DB_KEYS.movements),db.load(DB_KEYS.portioning),db.load(DB_KEYS.categories),db.load(DB_KEYS.units),db.load(DB_KEYS.waste)]);
+      const metas=await Promise.all(SYNC_KEYS.map(([,key])=>db.loadMeta(key)));
+      const mv={};metas.forEach((m,i)=>{mv[SYNC_KEYS[i][0]]=m;});
+      const si=mv.items.value,se=mv.emps.value,sm=mv.movs.value,sp=mv.port.value,sc=mv.cats.value,su=mv.units.value,sw=mv.wastes.value;
+      const nv={};SYNC_KEYS.forEach(([rk])=>{ if(mv[rk].version!=null) nv[rk]=mv[rk].version; });
+      vers.current=nv;
       const li=si&&si.length>0?si:[];
       const le=se&&se.length>0?se:[];
       const lm=sm&&sm.length>0?sm:[];
@@ -745,25 +845,80 @@ function App(){
   // Salva (de verdade) o que estiver pendente. Reaproveitado pelo debounce normal,
   // pelo watchdog de retry e pelo "sair da aba".
   const flushSave=useCallback(async()=>{
+    if(saving.current){ again.current=true; return; }
     const snap=pend.current;
     if(!snap) return;
-    const saves=[];
-    const chk=(key,val,rk)=>{if(JSON.stringify(val)!==JSON.stringify(ref.current[rk])){saves.push({key,val,rk});}};
-    chk(DB_KEYS.items,snap.items,"items");chk(DB_KEYS.employees,snap.emps,"emps");chk(DB_KEYS.movements,snap.movs,"movs");
-    chk(DB_KEYS.portioning,snap.port,"port");chk(DB_KEYS.waste,snap.wastes,"wastes");chk(DB_KEYS.categories,snap.cats,"cats");chk(DB_KEYS.units,snap.units,"units");
-    if(saves.length===0){ pend.current=null; return; }
+    const changed=SYNC_KEYS.filter(([rk])=>!jeq(snap[rk],ref.current[rk]));
+    if(changed.length===0){ pend.current=null; return; }
+    saving.current=true; again.current=false;
     setDbSt("saving");
+    const done={}; let remap={}; let err=null;
     try{
-      await Promise.all(saves.map(s=>db.save(s.key,s.val)));
-      // Só atualiza ref (e limpa o pendente) APÓS save completar com sucesso de verdade
-      saves.forEach(s=>{ref.current[s.rk]=s.val;});
-      pend.current=null;
-      setDbSt("saved");setLsav(new Date().toISOString());
-    }catch(e){
-      console.error("Falha ao salvar automaticamente:",e);
+      // Itens primeiro: se um item novo precisar trocar de id, as outras listas são corrigidas junto
+      for(const [rk,key] of changed){
+        const base=ref.current[rk], local=snap[rk];
+        let ver=vers.current[rk], server;
+        if(ver==null){
+          // versão desconhecida (ou API antiga): busca o que está no servidor agora para mesclar
+          const cur=await db.loadMeta(key);
+          server=cur.value; ver=cur.version;
+        }else{
+          server=base; // presume que ninguém mudou; se mudou, a API recusa (409) e mesclamos abaixo
+        }
+        for(let tries=0;;tries++){
+          const m=merge3(base,local,server,rk==="items"?null:remap);
+          const r=await db.saveV(key,m.list,ver);
+          if(r.conflict){
+            if(tries>=5) throw new Error('Muitos conflitos ao salvar "'+key+'"');
+            server=r.value; ver=r.version; continue;
+          }
+          if(rk==="items") remap=m.remap;
+          done[rk]={val:m.list,ver:r.version};
+          break;
+        }
+      }
+    }catch(e){ err=e; }
+    // Aplica o que foi salvo (mesmo se outra lista falhou)
+    Object.keys(done).forEach(rk=>{
+      const d=done[rk];
+      ref.current[rk]=d.val;
+      if(d.ver!=null) vers.current[rk]=d.ver; else delete vers.current[rk];
+      const setter=SETTERS.current[rk];
+      // Atualiza a tela com o que veio de outros aparelhos, preservando o que foi digitado durante o salvamento
+      if(setter) setter(cur=>cur===snap[rk]?d.val:merge3(snap[rk],cur,d.val,rk==="items"?null:remap).list);
+    });
+    saving.current=false;
+    if(err){
+      console.error("Falha ao salvar automaticamente:",err);
       setDbSt("error");
       // mantém pend.current — a próxima tentativa (watchdog ou nova alteração) tenta de novo
+    }else{
+      if(pend.current===snap) pend.current=null;
+      setDbSt("saved");setLsav(new Date().toISOString());
     }
+    if(again.current&&!err){ again.current=false; setTimeout(()=>{ flushRef.current&&flushRef.current(); },300); }
+  },[]);
+  flushRef.current=flushSave;
+
+  // Busca periodicamente as alterações feitas em OUTROS aparelhos e mescla na tela.
+  const syncRemote=useCallback(async()=>{
+    if(saving.current||pend.current) return; // há alterações locais: o salvamento já mescla
+    let res;
+    try{
+      res=await Promise.all(SYNC_KEYS.map(([rk,key])=>db.loadMeta(key,vers.current[rk])));
+    }catch(e){ return; } // sem rede: tenta na próxima
+    if(saving.current||pend.current) return;
+    SYNC_KEYS.forEach(([rk],i)=>{
+      const r=res[i];
+      if(r.unchanged||r.value==null) return;
+      if(r.version!=null&&r.version===vers.current[rk]) return;
+      if(jeq(r.value,ref.current[rk])){ if(r.version!=null) vers.current[rk]=r.version; return; }
+      const base=ref.current[rk];
+      ref.current[rk]=r.value;
+      if(r.version!=null) vers.current[rk]=r.version; else delete vers.current[rk];
+      const setter=SETTERS.current[rk];
+      if(setter) setter(cur=>merge3(base,cur,r.value,null).list);
+    });
   },[]);
 
   useEffect(()=>{
@@ -773,6 +928,16 @@ function App(){
     tmr.current=setTimeout(()=>{ flushSave(); },800);
     return()=>{if(tmr.current) clearTimeout(tmr.current);};
   },[items,emps,movs,port,wastes,cats,units,init,flushSave]);
+
+  useEffect(()=>{
+    if(!init) return;
+    const iv=setInterval(()=>{ if(document.visibilityState!=="hidden") syncRemote(); },15000);
+    function onFocus(){ syncRemote(); }
+    function onVis(){ if(document.visibilityState==="visible") syncRemote(); }
+    window.addEventListener("focus",onFocus);
+    document.addEventListener("visibilitychange",onVis);
+    return()=>{ clearInterval(iv); window.removeEventListener("focus",onFocus); document.removeEventListener("visibilitychange",onVis); };
+  },[init,syncRemote]);
 
   // Se um salvamento falhou, continua tentando periodicamente em segundo plano
   // em vez de desistir silenciosamente (o que fazia o indicador de status mentir).
@@ -795,7 +960,9 @@ function App(){
     function onBeforeUnload(){
       const snap=pend.current;
       if(!snap) return;
-      const chk=(key,val,rk)=>{if(JSON.stringify(val)!==JSON.stringify(ref.current[rk])){db.saveBeacon(key,val);}};
+      // Só envia se a versão for conhecida: assim a API recusa caso outro aparelho tenha alterado
+      // (evita sobrescrever o trabalho dos outros no fechamento da aba)
+      const chk=(key,val,rk)=>{if(vers.current[rk]!=null&&JSON.stringify(val)!==JSON.stringify(ref.current[rk])){db.saveBeacon(key,val,vers.current[rk]);}};
       chk(DB_KEYS.items,snap.items,"items");chk(DB_KEYS.employees,snap.emps,"emps");chk(DB_KEYS.movements,snap.movs,"movs");
       chk(DB_KEYS.portioning,snap.port,"port");chk(DB_KEYS.waste,snap.wastes,"wastes");chk(DB_KEYS.categories,snap.cats,"cats");chk(DB_KEYS.units,snap.units,"units");
     }
@@ -818,6 +985,7 @@ function App(){
     }
     setItems([]);setEmps([]);setMovs([]);setPort([]);setWastes([]);setCats(iCat);setUnits(iUni);
     ref.current={items:[],emps:[],movs:[],port:[],wastes:[],cats:iCat,units:iUni};
+    vers.current={};
     pend.current=null;
     setDbSt("saved");setLsav(new Date().toISOString());
     setResetMod(false);
